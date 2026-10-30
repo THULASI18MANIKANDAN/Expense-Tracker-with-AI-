@@ -1,0 +1,6 @@
+{
+  "name": "TMK Expense Tracker & Analytics Dashboard",
+  "description": "An AI-powered personal expense tracker and analytics dashboard featuring smart budgeting, visual financial reports, Excel/PDF export, and custom AI-driven spending insights using Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
