@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile, budget preferences, notification rules, and workspace integration settings.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID", "maxLength": 128 },
+        "name": { "type": "string", "description": "User display name", "maxLength": 120 },
+        "email": { "type": "string", "format": "email", "description": "User email address", "maxLength": 254 },
+        "monthlyBudget": { "type": "number", "description": "Active monthly spending limit" },
+        "currency": { "type": "string", "description": "Preferred currency symbol", "maxLength": 8 },
+        "photoURL": { "type": "string", "description": "Profile avatar URL", "maxLength": 512 },
+        "customCategories": { "type": "array", "description": "User-created expense categories" },
+        "createdAt": { "type": "string", "description": "ISO account creation timestamp", "maxLength": 64 },
+        "customPeriodBudget": { "type": "number", "description": "Custom cycle spending limit" },
+        "customPeriodStartDate": { "type": "string", "description": "Custom cycle start YYYY-MM-DD", "maxLength": 20 },
+        "customPeriodEndDate": { "type": "string", "description": "Custom cycle end YYYY-MM-DD", "maxLength": 20 },
+        "customPeriodEnabled": { "type": "boolean", "description": "Whether custom date cycle is active" },
+        "notificationSettings": { "type": "object", "description": "Alert thresholds and chime preferences" },
+        "googleChatSettings": { "type": "object", "description": "Google Chat space/webhook preferences" },
+        "gmailSettings": { "type": "object", "description": "Gmail automated weekly/monthly report preferences" }
+      },
+      "required": ["uid", "name", "email", "monthlyBudget", "currency"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Individual logged expense transaction.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner Firebase Auth UID", "maxLength": 128 },
+        "date": { "type": "string", "description": "Expense date YYYY-MM-DD", "maxLength": 20 },
+        "category": { "type": "string", "description": "Expense category", "maxLength": 64 },
+        "description": { "type": "string", "description": "Short expense description", "maxLength": 200 },
+        "amount": { "type": "number", "description": "Positive numeric expense amount" },
+        "paymentMode": { "type": "string", "description": "Payment method", "maxLength": 64 },
+        "notes": { "type": "string", "description": "Additional details or receipt notes", "maxLength": 1000 },
+        "createdAt": { "type": "string", "description": "Creation timestamp" }
+      },
+      "required": ["userId", "date", "category", "description", "amount", "paymentMode"]
+    },
+    "BudgetHistory": {
+      "title": "BudgetHistory",
+      "description": "Historical monthly budget target record.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner Firebase Auth UID", "maxLength": 128 },
+        "month": { "type": "string", "description": "Month key YYYY-MM", "maxLength": 16 },
+        "budget": { "type": "number", "description": "Monthly budget limit" }
+      },
+      "required": ["userId", "month", "budget"]
+    },
+    "SavingsGoal": {
+      "title": "SavingsGoal",
+      "description": "User-defined savings target and funding progress.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner Firebase Auth UID", "maxLength": 128 },
+        "name": { "type": "string", "description": "Savings goal title", "maxLength": 120 },
+        "targetAmount": { "type": "number", "description": "Target savings goal amount" },
+        "currentAmount": { "type": "number", "description": "Amount saved so far" },
+        "category": { "type": "string", "description": "Goal category tag", "maxLength": 64 },
+        "targetDate": { "type": "string", "description": "Target completion date YYYY-MM-DD", "maxLength": 20 },
+        "icon": { "type": "string", "description": "Icon identifier", "maxLength": 32 },
+        "color": { "type": "string", "description": "Accent theme identifier", "maxLength": 32 },
+        "notes": { "type": "string", "description": "Goal notes", "maxLength": 500 },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "description": "Last update timestamp" }
+      },
+      "required": ["userId", "name", "targetAmount", "currentAmount"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profile and automation settings scoped to the authenticated owner."
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "User expense ledger items scoped by userId."
+    },
+    "/budgets/{budgetId}": {
+      "schema": { "$ref": "#/entities/BudgetHistory" },
+      "description": "Monthly budget overrides scoped by userId."
+    },
+    "/savingsGoals/{goalId}": {
+      "schema": { "$ref": "#/entities/SavingsGoal" },
+      "description": "Savings goals and vault milestones scoped by userId."
+    }
+  }
+}

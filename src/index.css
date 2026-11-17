@@ -1,49 +1,340 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-/* Bento Card styles matching the design specifications */
-.bento-card-dark {
-  background-color: #0f172a;
-  border: 1px solid #1e293b;
-  border-radius: 1rem;
-  padding: 1.25rem;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+:root {
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
+
+/* Glassmorphism & Surface utilities */
+.glass-panel-dark {
+  background: rgba(12, 18, 32, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 32px 0 rgba(0, 0, 0, 0.45);
+}
+
+.glass-panel-light {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  box-shadow: 0 10px 25px 0 rgba(0, 0, 0, 0.04);
+}
+
+.bento-card-dark {
+  background: linear-gradient(145deg, rgba(14, 21, 37, 0.92) 0%, rgba(10, 15, 28, 0.88) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.25rem;
+  padding: 1.5rem;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.35);
+}
+
 .bento-card-dark:hover {
-  border-color: #334155;
-  box-shadow: 0 10px 25px -5px rgba(2, 6, 23, 0.5);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 16px 36px -10px rgba(0, 0, 0, 0.5);
+  transform: translateY(-2px);
 }
 
 .bento-card-light {
-  background-color: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 1rem;
-  padding: 1.25rem;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  background: #ffffff;
+  border: 1px solid rgba(203, 213, 225, 0.85);
+  border-radius: 1.25rem;
+  padding: 1.5rem;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.05);
 }
+
 .bento-card-light:hover {
-  border-color: #cbd5e1;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.04);
+  border-color: rgba(148, 163, 184, 0.9);
+  box-shadow: 0 12px 28px -5px rgba(15, 23, 42, 0.09);
+  transform: translateY(-2px);
 }
 
-/* Custom background utility variables and color rules */
-.bg-slate-850 {
-  background-color: #1e293b;
+/* Subtle dashboard geometric blueprint grid */
+.grid-bg-dark {
+  background-color: #080d1a;
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
-.bg-slate-750 {
-  background-color: #334155;
+.grid-bg-light {
+  background-color: #f1f5f9;
+  background-image: 
+    linear-gradient(rgba(100, 116, 139, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(100, 116, 139, 0.1) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
-/* Chrome, Safari and Opera scrollbar stylings */
+/* =========================================================================
+   LIGHT MODE CONTRAST ADAPTER (Scoped to light headers, cards & surfaces)
+   Ensures dark, legible typography & crisp borders on white backgrounds
+   while leaving dark-mode cards and dark modals untouched.
+   ========================================================================= */
+.light-surface .text-white:not(.bg-violet-500):not(.bg-indigo-500):not(.bg-rose-500):not(.bg-rose-600):not(.bg-emerald-500):not(.bg-cyan-500):not(.preserve-white),
+.bento-card-light .text-white:not(.bg-violet-500):not(.bg-indigo-500):not(.bg-rose-500):not(.bg-rose-600):not(.bg-emerald-500):not(.bg-cyan-500):not(.preserve-white) {
+  color: #0f172a !important;
+}
+
+.light-surface .text-slate-100,
+.bento-card-light .text-slate-100 {
+  color: #0f172a !important;
+}
+
+.light-surface .text-slate-200,
+.bento-card-light .text-slate-200 {
+  color: #1e293b !important;
+}
+
+.light-surface .text-slate-300,
+.bento-card-light .text-slate-300 {
+  color: #334155 !important;
+}
+
+.light-surface .text-slate-400,
+.bento-card-light .text-slate-400 {
+  color: #475569 !important;
+}
+
+.light-surface .text-slate-500,
+.bento-card-light .text-slate-500 {
+  color: #64748b !important;
+}
+
+/* Rich saturated accent shades on light surfaces for WCAG contrast */
+.light-surface .text-emerald-300,
+.light-surface .text-emerald-400:not(.preserve-accent),
+.bento-card-light .text-emerald-300,
+.bento-card-light .text-emerald-400:not(.preserve-accent),
+.bento-card-light .text-\[\#10b981\] {
+  color: #047857 !important;
+}
+
+.light-surface .text-cyan-300,
+.light-surface .text-cyan-400,
+.bento-card-light .text-cyan-300,
+.bento-card-light .text-cyan-400 {
+  color: #0e7490 !important;
+}
+
+.light-surface .text-teal-300,
+.light-surface .text-teal-400,
+.bento-card-light .text-teal-300,
+.bento-card-light .text-teal-400 {
+  color: #0f766e !important;
+}
+
+.light-surface .text-amber-300,
+.light-surface .text-amber-400,
+.bento-card-light .text-amber-300,
+.bento-card-light .text-amber-400 {
+  color: #b45309 !important;
+}
+
+.light-surface .text-rose-300,
+.light-surface .text-rose-400,
+.bento-card-light .text-rose-300,
+.bento-card-light .text-rose-400 {
+  color: #be123c !important;
+}
+
+.light-surface .text-indigo-300,
+.light-surface .text-indigo-400,
+.bento-card-light .text-indigo-300,
+.bento-card-light .text-indigo-400 {
+  color: #4338ca !important;
+}
+
+.light-surface .text-violet-300,
+.light-surface .text-violet-400,
+.bento-card-light .text-violet-300,
+.bento-card-light .text-violet-400 {
+  color: #6d28d9 !important;
+}
+
+.light-surface .text-purple-300,
+.light-surface .text-purple-400,
+.bento-card-light .text-purple-300,
+.bento-card-light .text-purple-400 {
+  color: #7e22ce !important;
+}
+
+.light-surface .text-sky-300,
+.light-surface .text-sky-400,
+.bento-card-light .text-sky-300,
+.bento-card-light .text-sky-400 {
+  color: #0369a1 !important;
+}
+
+.light-surface .text-orange-300,
+.light-surface .text-orange-400,
+.bento-card-light .text-orange-300,
+.bento-card-light .text-orange-400 {
+  color: #c2410c !important;
+}
+
+.light-surface .text-yellow-300,
+.light-surface .text-yellow-400,
+.bento-card-light .text-yellow-300,
+.bento-card-light .text-yellow-400 {
+  color: #a16207 !important;
+}
+
+.light-surface .text-fuchsia-300,
+.light-surface .text-fuchsia-400,
+.bento-card-light .text-fuchsia-300,
+.bento-card-light .text-fuchsia-400 {
+  color: #a21caf !important;
+}
+
+.light-surface .text-blue-300,
+.light-surface .text-blue-400,
+.bento-card-light .text-blue-300,
+.bento-card-light .text-blue-400 {
+  color: #1d4ed8 !important;
+}
+
+/* Subtle light inner tiles, tracks, inputs, and borders inside light cards */
+.light-surface .bg-white\/\[0\.01\],
+.light-surface .bg-white\/\[0\.02\],
+.light-surface .bg-white\/\[0\.03\],
+.light-surface .bg-white\/\[0\.04\],
+.light-surface .bg-white\/\[0\.05\],
+.light-surface .bg-white\/\[0\.06\],
+.bento-card-light .bg-white\/\[0\.01\],
+.bento-card-light .bg-white\/\[0\.02\],
+.bento-card-light .bg-white\/\[0\.03\],
+.bento-card-light .bg-white\/\[0\.04\],
+.bento-card-light .bg-white\/\[0\.05\],
+.bento-card-light .bg-white\/\[0\.06\] {
+  background-color: #f8fafc !important;
+}
+
+.light-surface .bg-slate-950\/40,
+.light-surface .bg-slate-950\/60,
+.light-surface .bg-slate-950\/70,
+.light-surface .bg-slate-950\/90,
+.light-surface .bg-slate-900\/60,
+.light-surface .bg-slate-900\/70,
+.light-surface .bg-slate-900\/80,
+.light-surface .bg-slate-900,
+.light-surface .bg-slate-950,
+.light-surface .bg-slate-800,
+.light-surface .bg-\[\#0d1424\]\/90,
+.light-surface .bg-\[\#070b14\]\/90,
+.light-surface .bg-black\/25,
+.light-surface .bg-black\/30,
+.light-surface .bg-black\/40,
+.bento-card-light .bg-slate-950\/40,
+.bento-card-light .bg-slate-950\/60,
+.bento-card-light .bg-slate-950\/70,
+.bento-card-light .bg-slate-950\/90,
+.bento-card-light .bg-slate-900\/60,
+.bento-card-light .bg-slate-900\/70,
+.bento-card-light .bg-slate-900\/80,
+.bento-card-light .bg-slate-900,
+.bento-card-light .bg-slate-950,
+.bento-card-light .bg-slate-800,
+.bento-card-light .bg-\[\#0d1424\]\/90,
+.bento-card-light .bg-\[\#070b14\]\/90,
+.bento-card-light .bg-black\/25,
+.bento-card-light .bg-black\/30,
+.bento-card-light .bg-black\/40 {
+  background-color: #f1f5f9 !important;
+}
+
+.bento-card-light input,
+.bento-card-light select,
+.bento-card-light textarea,
+.light-surface input,
+.light-surface select,
+.light-surface textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light-surface .border-white\/\[0\.05\],
+.light-surface .border-white\/\[0\.06\],
+.light-surface .border-white\/\[0\.07\],
+.light-surface .border-white\/\[0\.08\],
+.light-surface .border-white\/10,
+.light-surface .border-white\/15,
+.light-surface .border-white\/20,
+.light-surface .border-white\/40,
+.bento-card-light .border-white\/\[0\.05\],
+.bento-card-light .border-white\/\[0\.06\],
+.bento-card-light .border-white\/\[0\.07\],
+.bento-card-light .border-white\/\[0\.08\],
+.bento-card-light .border-white\/10,
+.bento-card-light .border-white\/15,
+.bento-card-light .border-white\/20,
+.bento-card-light .border-white\/40 {
+  border-color: rgba(148, 163, 184, 0.35) !important;
+}
+
+.bento-card-light .divide-white\/\[0\.05\] > :not(:last-child) {
+  border-color: rgba(148, 163, 184, 0.25) !important;
+}
+
+.light-surface .hover\:text-white:hover,
+.bento-card-light .hover\:text-white:hover {
+  color: #0f172a !important;
+}
+
+/* Tabular figures for all financial stats */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ambient glow accents for elegant multi-color dashboard */
+.emerald-glow {
+  box-shadow: 0 0 25px -4px rgba(16, 185, 129, 0.4);
+}
+
+.cyan-glow {
+  box-shadow: 0 0 25px -4px rgba(6, 182, 212, 0.4);
+}
+
+.violet-glow {
+  box-shadow: 0 0 25px -4px rgba(139, 92, 246, 0.4);
+}
+
+.amber-glow {
+  box-shadow: 0 0 25px -4px rgba(245, 158, 11, 0.4);
+}
+
+.rose-glow {
+  box-shadow: 0 0 25px -4px rgba(244, 63, 94, 0.4);
+}
+
+/* Hide scrollbar utility for clean mobile swipe bars */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Sleek minimalist scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -51,11 +342,10 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 99px;
+  background: rgba(100, 116, 139, 0.35);
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: rgba(148, 163, 184, 0.6);
 }
-

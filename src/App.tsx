@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { onAuthStateChanged, signOut, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { 
   collection, 
@@ -12,11 +12,18 @@ import {
   setDoc,
   serverTimestamp 
 } from "firebase/firestore";
-import { auth, db } from "./lib/firebase";
+import { auth, db, stripUndefined } from "./lib/firebase";
+import { setGmailAccessToken } from "./lib/gmail";
 import { UserProfile, Expense } from "./types";
 import AuthScreen from "./components/AuthScreen";
 import ExpenseModal from "./components/ExpenseModal";
 import AIChatAssistant from "./components/AIChatAssistant";
+import ThalaivarPopup from "./components/ThalaivarPopup";
+import SpendingProjectionCard from "./components/SpendingProjectionCard";
+import SavingsGoalsCard from "./components/SavingsGoalsCard";
+import ReceiptScannerModal from "./components/ReceiptScannerModal";
+import GmailReportsModal from "./components/GmailReportsModal";
+import GmailReportsCard from "./components/GmailReportsCard";
 import { 
   exportToExcel, 
   exportToPDF, 
@@ -30,6 +37,9 @@ import {
   Download, 
   Upload, 
   Sparkles, 
+  ScanLine,
+  Camera, 
+  Mail,
   User, 
   LogOut, 
   PieChart as PieIcon, 
@@ -53,7 +63,19 @@ import {
   ChevronRight,
   Info,
   CalendarDays,
-  Receipt
+  Receipt,
+  Bot,
+  MessageSquare,
+  Activity,
+  ArrowRight,
+  ArrowUpRight,
+  ArrowDownRight,
+  SlidersHorizontal,
+  Layers,
+  Flame,
+  CheckCircle2,
+  ShieldCheck,
+  Check
 } from "lucide-react";
 import { 
   ResponsiveContainer, 
@@ -61,7 +83,6 @@ import {
   Pie, 
   Cell, 
   Tooltip, 
-  Legend, 
   LineChart, 
   Line, 
   XAxis, 
@@ -74,19 +95,78 @@ import {
 } from "recharts";
 import { motion, AnimatePresence } from "motion/react";
 
-const COLORS = [
+const PALETTE = [
   "#10b981", // Emerald
-  "#3b82f6", // Blue
-  "#8b5cf6", // Purple
-  "#ec4899", // Pink
-  "#f59e0b", // Amber
-  "#ef4444", // Red
   "#06b6d4", // Cyan
+  "#6366f1", // Indigo
+  "#f59e0b", // Amber
+  "#ec4899", // Pink
+  "#8b5cf6", // Purple
+  "#3b82f6", // Blue
   "#14b8a6", // Teal
-  "#a855f7", // Light Purple
   "#f97316", // Orange
   "#64748b"  // Slate
 ];
+
+// Rich, elegant color mapping for transaction categories
+export const getCategoryStyle = (category: string) => {
+  const cat = (category || "").trim();
+  switch (cat) {
+    case "Food":
+      return { bg: "bg-amber-500/15", border: "border-amber-500/30", text: "text-amber-300", dot: "bg-amber-400", hex: "#f59e0b" };
+    case "PG":
+      return { bg: "bg-indigo-500/15", border: "border-indigo-500/30", text: "text-indigo-300", dot: "bg-indigo-400", hex: "#6366f1" };
+    case "Travel":
+      return { bg: "bg-cyan-500/15", border: "border-cyan-500/30", text: "text-cyan-300", dot: "bg-cyan-400", hex: "#06b6d4" };
+    case "Auto":
+      return { bg: "bg-sky-500/15", border: "border-sky-500/30", text: "text-sky-300", dot: "bg-sky-400", hex: "#0ea5e9" };
+    case "Cab":
+      return { bg: "bg-teal-500/15", border: "border-teal-500/30", text: "text-teal-300", dot: "bg-teal-400", hex: "#14b8a6" };
+    case "Tea":
+      return { bg: "bg-orange-500/15", border: "border-orange-500/30", text: "text-orange-300", dot: "bg-orange-400", hex: "#f97316" };
+    case "Shopping":
+      return { bg: "bg-rose-500/15", border: "border-rose-500/30", text: "text-rose-300", dot: "bg-rose-400", hex: "#f43f5e" };
+    case "Medicine":
+      return { bg: "bg-emerald-500/15", border: "border-emerald-500/30", text: "text-emerald-300", dot: "bg-emerald-400", hex: "#10b981" };
+    case "Fuel":
+      return { bg: "bg-yellow-500/15", border: "border-yellow-500/30", text: "text-yellow-300", dot: "bg-yellow-400", hex: "#eab308" };
+    case "Entertainment":
+      return { bg: "bg-fuchsia-500/15", border: "border-fuchsia-500/30", text: "text-fuchsia-300", dot: "bg-fuchsia-400", hex: "#d946ef" };
+    case "Bills":
+      return { bg: "bg-purple-500/15", border: "border-purple-500/30", text: "text-purple-300", dot: "bg-purple-400", hex: "#a855f7" };
+    case "Miscellaneous":
+      return { bg: "bg-slate-500/15", border: "border-slate-500/30", text: "text-slate-300", dot: "bg-slate-400", hex: "#64748b" };
+    default: {
+      const colors = [
+        { bg: "bg-blue-500/15", border: "border-blue-500/30", text: "text-blue-300", dot: "bg-blue-400", hex: "#3b82f6" },
+        { bg: "bg-emerald-500/15", border: "border-emerald-500/30", text: "text-emerald-300", dot: "bg-emerald-400", hex: "#10b981" },
+        { bg: "bg-violet-500/15", border: "border-violet-500/30", text: "text-violet-300", dot: "bg-violet-400", hex: "#8b5cf6" },
+        { bg: "bg-amber-500/15", border: "border-amber-500/30", text: "text-amber-300", dot: "bg-amber-400", hex: "#f59e0b" },
+        { bg: "bg-pink-500/15", border: "border-pink-500/30", text: "text-pink-300", dot: "bg-pink-400", hex: "#ec4899" }
+      ];
+      let hash = 0;
+      for (let i = 0; i < cat.length; i++) hash = cat.charCodeAt(i) + ((hash << 5) - hash);
+      return colors[Math.abs(hash) % colors.length];
+    }
+  }
+};
+
+// Color mapping for payment channels
+export const getPaymentStyle = (mode: string) => {
+  switch (mode) {
+    case "UPI":
+      return { bg: "bg-violet-500/15", border: "border-violet-500/30", text: "text-violet-300" };
+    case "Credit Card":
+      return { bg: "bg-sky-500/15", border: "border-sky-500/30", text: "text-sky-300" };
+    case "Debit Card":
+      return { bg: "bg-blue-500/15", border: "border-blue-500/30", text: "text-blue-300" };
+    case "Net Banking":
+      return { bg: "bg-amber-500/15", border: "border-amber-500/30", text: "text-amber-300" };
+    case "Cash":
+    default:
+      return { bg: "bg-emerald-500/15", border: "border-emerald-500/30", text: "text-emerald-300" };
+  }
+};
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -95,35 +175,14 @@ const MONTH_NAMES = [
 
 const WEEK_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-const containerVariants = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0.04,
-      delayChildren: 0.05
-    }
-  }
-};
-
-const cardVariants = {
-  hidden: { opacity: 0, y: 12 },
-  show: {
-    opacity: 1,
-    y: 0,
-    transition: {
-      type: "spring",
-      stiffness: 90,
-      damping: 15
-    }
-  }
-};
-
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Active View Tab Switcher: "overview" | "analytics" | "calendar" | "transactions"
+  const [activeTab, setActiveTab] = useState<"overview" | "analytics" | "calendar" | "transactions">("overview");
 
   // Filter States
   const [search, setSearch] = useState("");
@@ -133,18 +192,23 @@ export default function App() {
   const [yearFilter, setYearFilter] = useState("All");
   const [minAmount, setMinAmount] = useState("");
   const [maxAmount, setMaxAmount] = useState("");
+  const [startDateFilter, setStartDateFilter] = useState("");
+  const [endDateFilter, setEndDateFilter] = useState("");
 
-  // Modals & Assistant Toggle
+  // Modals & Panels
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isReceiptScannerOpen, setIsReceiptScannerOpen] = useState(false);
+  const [isGmailModalOpen, setIsGmailModalOpen] = useState(false);
+  const [gmailInitialReportType, setGmailInitialReportType] = useState<"weekly" | "monthly" | null>(null);
   const [expenseToEdit, setExpenseToEdit] = useState<Expense | null>(null);
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
 
-  // Dark Mode
+  // Dark Mode (Obsidian default)
   const [darkMode, setDarkMode] = useState(true);
 
-  // Feedback Notification
+  // Notifications Toast
   const [notification, setNotification] = useState<{
     message: string;
     type: "success" | "warning" | "info";
@@ -152,21 +216,17 @@ export default function App() {
 
   // Profile Edit fields
   const [profileName, setProfileName] = useState("");
-  const [profileBudget, setProfileBudget] = useState("");
+  const [profileBudget, setProfileBudget] = useState("15000");
   const [profileCurrency, setProfileCurrency] = useState("₹");
 
-  // Start/End date manual list filters
-  const [startDateFilter, setStartDateFilter] = useState("");
-  const [endDateFilter, setEndDateFilter] = useState("");
-
-  // Custom period states for editing in settings form
+  // Custom period states
   const [customPeriodBudget, setCustomPeriodBudget] = useState("15000");
   const [customPeriodStartDate, setCustomPeriodStartDate] = useState("2026-06-23");
   const [customPeriodEndDate, setCustomPeriodEndDate] = useState("2026-07-23");
   const [customPeriodEnabled, setCustomPeriodEnabled] = useState(false);
   const [isEditingCustomCycle, setIsEditingCustomCycle] = useState(false);
 
-  // Notification states for settings form
+  // Notification states
   const [notifyAt80, setNotifyAt80] = useState(true);
   const [notifyAt100, setNotifyAt100] = useState(true);
   const [soundAlerts, setSoundAlerts] = useState(true);
@@ -183,10 +243,22 @@ export default function App() {
   const [chatAutoPostWeekly, setChatAutoPostWeekly] = useState(false);
   const [chatLoadingSpaces, setChatLoadingSpaces] = useState(false);
 
-  // Selected Month details panel (bento monthly insights click)
+  // Selected Month details panel (Monthly spend drill-down)
   const [selectedMonthDetails, setSelectedMonthDetails] = useState<string | null>(null);
 
-  // Local state for inline Active Monthly Budget block editing
+  // Superstar Rajini Thalaivar Punch popup states
+  const [thalaivarExpense, setThalaivarExpense] = useState<{
+    amount: number;
+    category: string;
+    description?: string;
+  } | null>(null);
+  const [isThalaivarPopupOpen, setIsThalaivarPopupOpen] = useState(false);
+
+  // Delete transaction confirmation state
+  const [expenseToDelete, setExpenseToDelete] = useState<Expense | null>(null);
+  const [isDeletingRecord, setIsDeletingRecord] = useState(false);
+
+  // Inline Active Monthly Budget block editing
   const [isEditingActiveBudgetBlock, setIsEditingActiveBudgetBlock] = useState(false);
   const [activeBudgetLimitInput, setActiveBudgetLimitInput] = useState("");
   const [activeBudgetStartInput, setActiveBudgetStartInput] = useState("");
@@ -199,10 +271,6 @@ export default function App() {
   const [compStartB, setCompStartB] = useState("");
   const [compEndB, setCompEndB] = useState("");
 
-  // Mobile viewport detection
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
-
   // Calendar Dashboard States
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
@@ -213,22 +281,14 @@ export default function App() {
     const date = String(d.getDate()).padStart(2, "0");
     return `${year}-${month}-${date}`;
   });
-  const [trendViewMode, setTrendViewMode] = useState<"chart" | "calendar">("calendar");
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
-      setWindowWidth(window.innerWidth);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   // Track Auth State changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
       if (!firebaseUser) {
+        setGmailAccessToken(null);
+        setGoogleChatToken(null);
         setProfile(null);
         setExpenses([]);
         setLoading(false);
@@ -241,7 +301,7 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    // Listen to profile
+    // Listen to profile doc
     const profileRef = doc(db, "users", user.uid);
     const unsubscribeProfile = onSnapshot(profileRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -251,13 +311,11 @@ export default function App() {
         setProfileBudget(data.monthlyBudget?.toString() || "15000");
         setProfileCurrency(data.currency || "₹");
         
-        // Load custom period states
         setCustomPeriodBudget(data.customPeriodBudget?.toString() || "15000");
         setCustomPeriodStartDate(data.customPeriodStartDate || "2026-06-23");
         setCustomPeriodEndDate(data.customPeriodEndDate || "2026-07-23");
         setCustomPeriodEnabled(!!data.customPeriodEnabled);
 
-        // Load notification preference states
         const notif = data.notificationSettings || {
           notifyAt80: true,
           notifyAt100: true,
@@ -271,7 +329,6 @@ export default function App() {
         setDailyReminders(!!notif.dailyReminders);
         setWeeklyEmailReports(!!notif.weeklyEmailReports);
 
-        // Load Google Chat settings
         const gchat = data.googleChatSettings || {
           selectedSpaceName: "",
           selectedSpaceDisplayName: "",
@@ -285,7 +342,6 @@ export default function App() {
         setChatAutoPostWarnings(!!gchat.autoPostWarnings);
         setChatAutoPostWeekly(!!gchat.autoPostWeeklyDigest);
       } else {
-        // Fallback or bootstrap
         const newProfile: UserProfile = {
           uid: user.uid,
           name: user.displayName || "User",
@@ -313,9 +369,14 @@ export default function App() {
             autoPostWeeklyDigest: false
           }
         };
-        setDoc(profileRef, newProfile);
+        setDoc(profileRef, stripUndefined(newProfile), { merge: true }).catch((err) => {
+          console.error("Failed to initialize user profile:", err);
+        });
         setProfile(newProfile);
       }
+    }, (error) => {
+      console.error("Error listening to user profile:", error);
+      setLoading(false);
     });
 
     // Listen to real-time expenses
@@ -326,7 +387,6 @@ export default function App() {
       querySnapshot.forEach((doc) => {
         list.push({ id: doc.id, ...doc.data() } as Expense);
       });
-      // Sort primarily by date descending, then createdAt descending
       list.sort((a, b) => b.date.localeCompare(a.date));
       setExpenses(list);
       setLoading(false);
@@ -342,33 +402,31 @@ export default function App() {
     };
   }, [user]);
 
-  // Elegant Sound Chime synthesizer using Web Audio API
+  // Audio Chime synthesizer using Web Audio API
   const playNotificationSound = (type: "warning" | "success" | "info") => {
     try {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-      const ctx = new AudioContext();
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
       
       if (type === "warning") {
-        // Warning chime - double high beeps
-        const osc1 = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc1.type = "sine";
-        osc1.frequency.setValueAtTime(440, ctx.currentTime);
-        osc1.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
-        gain.gain.setValueAtTime(0.12, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
-        osc1.connect(gain);
-        gain.connect(ctx.destination);
-        osc1.start();
-        osc1.stop(ctx.currentTime + 0.4);
-      } else {
-        // Success/Info chime
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = "sine";
-        osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
-        osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1); // E5
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+      } else {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+        osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1);
         gain.gain.setValueAtTime(0.08, ctx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.5);
         osc.connect(gain);
@@ -381,91 +439,9 @@ export default function App() {
     }
   };
 
-  // Budget exceeded trigger check (Real-time in-app/push alerts at 80% & 100%)
-  useEffect(() => {
-    if (!profile || expenses.length === 0) return;
-    const currentMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
-    const currentMonthSpent = expenses
-      .filter(e => e.date.substring(0, 7) === currentMonth)
-      .reduce((sum, e) => sum + e.amount, 0);
-
-    const budget = profile.monthlyBudget || 15000;
-    const ratio = currentMonthSpent / budget;
-    
-    const notifySettings = profile.notificationSettings || {
-      notifyAt80: true,
-      notifyAt100: true,
-      soundAlerts: true,
-      dailyReminders: false
-    };
-
-    // Check 100% budget limit
-    if (currentMonthSpent > budget) {
-      const storageKey = `alert-100-${currentMonth}-${budget}`;
-      if (!sessionStorage.getItem(storageKey)) {
-        sessionStorage.setItem(storageKey, "triggered");
-        
-        const msg = `⚠️ Budget Limit Exceeded! Spent: ${profile.currency}${currentMonthSpent.toLocaleString()} / Limit: ${profile.currency}${budget.toLocaleString()}`;
-        showNotification(msg, "warning");
-        
-        if (notifySettings.soundAlerts) {
-          playNotificationSound("warning");
-        }
-        
-        if (notifySettings.notifyAt100 && "Notification" in window && Notification.permission === "granted") {
-          try {
-            new Notification("TMK Budget Exceeded!", {
-              body: `You have spent ${profile.currency}${currentMonthSpent.toFixed(2)} of your ${profile.currency}${budget} limit.`,
-              tag: "budget-limit-exceeded"
-            });
-          } catch (e) {
-            console.warn("Browser Notification instantiation blocked.", e);
-          }
-        }
-
-        // Auto post warning to Google Chat
-        if (profile.googleChatSettings?.autoPostWarnings && (chatWebhookUrl || (googleChatToken && selectedSpace))) {
-          const chatMsg = `🚨 *TMK Budget Alert: 100% Exceeded!* 🚨\nHi! Your spending for this month has reached *${profile.currency}${currentMonthSpent.toLocaleString()}*, which exceeds your limit of *${profile.currency}${budget.toLocaleString()}*.\nPlease review your expenses on the TMK Expense Tracker dashboard.`;
-          sendGoogleChatMessage(chatMsg);
-        }
-      }
-    } 
-    // Check 80% warning limit
-    else if (ratio >= 0.8) {
-      const storageKey = `alert-80-${currentMonth}-${budget}`;
-      if (!sessionStorage.getItem(storageKey)) {
-        sessionStorage.setItem(storageKey, "triggered");
-        
-        const msg = `⚠️ Budget Alert: You have utilized ${((ratio) * 100).toFixed(0)}% of your monthly budget limit (${profile.currency}${currentMonthSpent.toLocaleString()} / ${profile.currency}${budget.toLocaleString()})`;
-        showNotification(msg, "warning");
-        
-        if (notifySettings.soundAlerts) {
-          playNotificationSound("warning");
-        }
-        
-        if (notifySettings.notifyAt80 && "Notification" in window && Notification.permission === "granted") {
-          try {
-            new Notification("TMK Budget Alert (80% used)", {
-              body: `You have spent ${profile.currency}${currentMonthSpent.toFixed(2)} (${((ratio) * 100).toFixed(0)}%) of your ${profile.currency}${budget} limit.`,
-              tag: "budget-limit-warning"
-            });
-          } catch (e) {
-            console.warn("Browser Notification instantiation blocked.", e);
-          }
-        }
-
-        // Auto post warning to Google Chat
-        if (profile.googleChatSettings?.autoPostWarnings && (chatWebhookUrl || (googleChatToken && selectedSpace))) {
-          const chatMsg = `⚠️ *TMK Budget Warning: 80% Utilized!* ⚠️\nHi! You have utilized *${((ratio) * 100).toFixed(0)}%* of your monthly budget limit.\nSpent: *${profile.currency}${currentMonthSpent.toLocaleString()}* / Limit: *${profile.currency}${budget.toLocaleString()}*.\nKeep an eye on your remaining budget!`;
-          sendGoogleChatMessage(chatMsg);
-        }
-      }
-    }
-  }, [expenses, profile, googleChatToken, selectedSpace, chatWebhookUrl]);
-
+  // Toast notifier
   const showNotification = (message: string, type: "success" | "warning" | "info") => {
     setNotification({ message, type });
-    // Play subtle audio cue for success/warning chimes
     if (type === "success" && (!profile || profile.notificationSettings?.soundAlerts !== false)) {
       playNotificationSound("success");
     } else if (type === "warning" && (!profile || profile.notificationSettings?.soundAlerts !== false)) {
@@ -473,12 +449,14 @@ export default function App() {
     }
     setTimeout(() => {
       setNotification(null);
-    }, 6000);
+    }, 5500);
   };
 
-  // Auth logout
+  // Logout
   const handleLogout = async () => {
     try {
+      setGmailAccessToken(null);
+      setGoogleChatToken(null);
       await signOut(auth);
       showNotification("Signed out successfully", "info");
     } catch (err) {
@@ -491,40 +469,65 @@ export default function App() {
     if (!user) return;
     try {
       if (expenseToEdit && expenseToEdit.id) {
-        // Update existing doc
         const docRef = doc(db, "expenses", expenseToEdit.id);
         await updateDoc(docRef, expenseData);
-        showNotification("Expense updated successfully!", "success");
+        showNotification("Transaction updated successfully", "success");
       } else {
-        // Create new doc
         const collRef = collection(db, "expenses");
         await addDoc(collRef, {
           userId: user.uid,
           createdAt: serverTimestamp(),
           ...expenseData
         });
-        showNotification("Expense added successfully!", "success");
+        showNotification("Transaction recorded successfully", "success");
       }
       setExpenseToEdit(null);
+
+      // Trigger Superstar Rajinikanth punch dialogue popup!
+      setThalaivarExpense({
+        amount: Number(expenseData.amount) || 0,
+        category: expenseData.category || "Expense",
+        description: expenseData.description || ""
+      });
+      setIsThalaivarPopupOpen(true);
     } catch (err: any) {
       console.error(err);
       showNotification("Error saving transaction: " + err.message, "warning");
     }
   };
 
-  // Delete transaction
-  const handleDeleteExpense = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this transaction?")) return;
+  // Delete transaction flow (in-app modal to avoid iframe window.confirm blocking)
+  const requestDeleteExpense = (exp: Expense) => {
+    setExpenseToDelete(exp);
+  };
+
+  const executeDeleteExpense = async (id: string) => {
+    setIsDeletingRecord(true);
     try {
+      // Optimistic update so UI reflects deletion instantly
+      setExpenses((prev) => prev.filter((item) => item.id !== id));
       await deleteDoc(doc(db, "expenses", id));
-      showNotification("Expense deleted successfully", "success");
+      showNotification("Transaction record removed successfully", "success");
+      setExpenseToDelete(null);
     } catch (err: any) {
-      console.error(err);
-      showNotification("Error deleting: " + err.message, "warning");
+      console.error("Delete expense error:", err);
+      showNotification("Error deleting transaction: " + (err.message || "Failed to delete record"), "warning");
+    } finally {
+      setIsDeletingRecord(false);
     }
   };
 
-  // Add a custom category to Firestore profile
+  // Backwards-compatible alias that opens delete modal if item found, or deletes directly
+  const handleDeleteExpense = async (id: string) => {
+    const target = expenses.find((e) => e.id === id);
+    if (target) {
+      requestDeleteExpense(target);
+    } else {
+      await executeDeleteExpense(id);
+    }
+  };
+
+  // Add custom category
   const handleAddCustomCategory = async (newCategory: string) => {
     if (!user || !profile) return;
     const updatedCustoms = [...(profile.customCategories || [])];
@@ -541,14 +544,11 @@ export default function App() {
     }
   };
 
-  // Connect to Google Chat
+  // Connect Google Chat
   const handleConnectGoogleChat = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({
-        prompt: "select_account"
-      });
-      // Add standard user-delegated Google Chat scopes
+      provider.setCustomParameters({ prompt: "select_account" });
       provider.addScope("https://www.googleapis.com/auth/chat.spaces");
       provider.addScope("https://www.googleapis.com/auth/chat.spaces.readonly");
       provider.addScope("https://www.googleapis.com/auth/chat.messages");
@@ -560,14 +560,13 @@ export default function App() {
       if (credential?.accessToken) {
         setGoogleChatToken(credential.accessToken);
         showNotification("Google Chat connected successfully!", "success");
-        // Fetch spaces
         await fetchGoogleChatSpaces(credential.accessToken);
       } else {
-        throw new Error("Failed to retrieve access token.");
+        throw new Error("Unable to retrieve OAuth token.");
       }
     } catch (err: any) {
       console.error(err);
-      showNotification("Failed to connect to Google Chat: " + (err.message || err), "warning");
+      showNotification("Failed to connect Google Chat: " + (err.message || err), "warning");
     }
   };
 
@@ -575,27 +574,21 @@ export default function App() {
     setChatLoadingSpaces(true);
     try {
       const res = await fetch("https://chat.googleapis.com/v1/spaces", {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) {
         const errText = await res.text();
-        throw new Error(`Google API error: ${res.status} - ${errText}`);
+        throw new Error(`Chat API error: ${res.status} - ${errText}`);
       }
       const data = await res.json();
       const spaces = data.spaces || [];
       setChatSpaces(spaces);
-      
-      if (spaces.length > 0) {
-        const exists = spaces.some((s: any) => s.name === selectedSpace);
-        if (!exists && !selectedSpace) {
-          setSelectedSpace(spaces[0].name);
-          setSelectedSpaceDisplay(spaces[0].displayName || spaces[0].name);
-        }
+      if (spaces.length > 0 && !selectedSpace) {
+        setSelectedSpace(spaces[0].name);
+        setSelectedSpaceDisplay(spaces[0].displayName || spaces[0].name);
       }
     } catch (err: any) {
-      console.error("Error fetching Google Chat spaces:", err);
+      console.error("Error fetching spaces:", err);
       showNotification("Could not fetch spaces: " + err.message, "warning");
     } finally {
       setChatLoadingSpaces(false);
@@ -603,37 +596,27 @@ export default function App() {
   };
 
   const sendGoogleChatMessage = async (text: string, spaceOverride?: string) => {
-    // If webhookUrl is configured, send directly via webhook first as it's highly robust
     if (chatWebhookUrl) {
       try {
         const res = await fetch(chatWebhookUrl, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text })
         });
-        if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(`Webhook error: ${res.status} - ${errText}`);
-        }
-        showNotification("Message sent to Google Chat space (via Webhook)!", "success");
+        if (!res.ok) throw new Error(`Webhook error: ${res.status}`);
+        showNotification("Message delivered to Google Chat via Webhook", "success");
         return true;
       } catch (err: any) {
-        console.error("Error sending Google Chat webhook message:", err);
-        showNotification("Could not send message via Webhook: " + err.message, "warning");
+        console.error(err);
+        showNotification("Webhook failed: " + err.message, "warning");
         return false;
       }
     }
 
     const token = googleChatToken;
     const targetSpace = spaceOverride || selectedSpace;
-    if (!token) {
-      showNotification("Please connect Google Chat or configure an Incoming Webhook URL first.", "warning");
-      return false;
-    }
-    if (!targetSpace) {
-      showNotification("Please select a Google Chat space first.", "warning");
+    if (!token || !targetSpace) {
+      showNotification("Please configure Google Chat webhook or connect spaces", "warning");
       return false;
     }
 
@@ -646,43 +629,34 @@ export default function App() {
         },
         body: JSON.stringify({ text })
       });
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Google API error: ${res.status} - ${errText}`);
-      }
-      showNotification("Message sent to Google Chat space!", "success");
+      if (!res.ok) throw new Error(`Chat message error: ${res.status}`);
+      showNotification("Message sent to Google Chat space", "success");
       return true;
     } catch (err: any) {
-      console.error("Error sending Google Chat message:", err);
-      showNotification("Could not send message: " + err.message, "warning");
+      console.error(err);
+      showNotification("Message error: " + err.message, "warning");
       return false;
     }
   };
 
-  // Request push notification permissions
   const requestPushPermission = async () => {
     if (!("Notification" in window)) {
-      showNotification("Push notifications are not supported on this browser.", "warning");
+      showNotification("Push notifications are not supported in this browser.", "warning");
       return;
     }
     try {
-      const permission = await Notification.requestPermission();
-      if (permission === "granted") {
-        showNotification("Browser notification permission granted! Alerts are now active.", "success");
-        new Notification("TMK Alerts Activated!", {
-          body: "You will now receive push notifications at 80% and 100% budget utilization.",
-          tag: "welcome-alert"
-        });
+      const perm = await Notification.requestPermission();
+      if (perm === "granted") {
+        showNotification("Push alert permissions enabled!", "success");
       } else {
-        showNotification("Notification permission denied or dismissed.", "warning");
+        showNotification("Notification permission dismissed.", "warning");
       }
     } catch (e: any) {
-      console.warn("Notification request failed: ", e);
-      showNotification("Notification prompt failed or blocked.", "warning");
+      showNotification("Notification prompt blocked.", "warning");
     }
   };
 
-  // Save updated User Profile settings
+  // Save Profile Preferences
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -696,11 +670,11 @@ export default function App() {
         customPeriodStartDate: customPeriodStartDate,
         customPeriodEndDate: customPeriodEndDate,
         notificationSettings: {
-          notifyAt80: notifyAt80,
-          notifyAt100: notifyAt100,
-          soundAlerts: soundAlerts,
-          dailyReminders: dailyReminders,
-          weeklyEmailReports: weeklyEmailReports
+          notifyAt80,
+          notifyAt100,
+          soundAlerts,
+          dailyReminders,
+          weeklyEmailReports
         },
         googleChatSettings: {
           selectedSpaceName: selectedSpace,
@@ -711,32 +685,56 @@ export default function App() {
         }
       });
       setIsProfileOpen(false);
-      showNotification("Preferences, custom cycles, and notifications saved!", "success");
+      showNotification("Profile & tracker settings saved!", "success");
     } catch (err: any) {
       console.error(err);
       showNotification("Failed to update profile: " + err.message, "warning");
     }
   };
 
-  // Save updated Custom Period settings directly
-  const handleSaveCustomCycleDirectly = async (enabled: boolean, start: string, end: string, budget: string) => {
+  // Update Gmail automation preferences in Firestore
+  const handleUpdateGmailSettings = async (settings: {
+    connected: boolean;
+    recipientEmail: string;
+    weeklyReportsEnabled: boolean;
+    monthlyReportsEnabled: boolean;
+    lastWeeklyReportSentAt?: string;
+    lastMonthlyReportSentAt?: string;
+  }) => {
     if (!user) return;
     try {
-      await updateDoc(doc(db, "users", user.uid), {
-        customPeriodEnabled: enabled,
-        customPeriodStartDate: start,
-        customPeriodEndDate: end,
-        customPeriodBudget: Number(budget) || 0
+      const userDocRef = doc(db, "users", user.uid);
+      const updatedGmailSettings = stripUndefined({
+        ...(profile?.gmailSettings || {}),
+        ...settings,
       });
-      setIsEditingCustomCycle(false);
-      showNotification("Custom budget cycle saved successfully!", "success");
+      await setDoc(
+        userDocRef,
+        {
+          gmailSettings: updatedGmailSettings,
+        },
+        { merge: true }
+      );
+      setProfile((prev) =>
+        prev
+          ? {
+              ...prev,
+              gmailSettings: updatedGmailSettings,
+            }
+          : null
+      );
     } catch (err: any) {
-      console.error(err);
-      showNotification("Failed to update custom cycle: " + err.message, "warning");
+      console.error("Failed to update Gmail settings in Firestore:", err);
+      throw err;
     }
   };
 
-  // Save updated Active Budget settings inline from the bento widget
+  const handleTriggerQuickSend = (type: "weekly" | "monthly") => {
+    setGmailInitialReportType(type);
+    setIsGmailModalOpen(true);
+  };
+
+  // Inline Active Budget Save
   const handleSaveActiveBudgetInline = async (limit: string, useCustom: boolean, start: string, end: string) => {
     if (!user) return;
     try {
@@ -749,26 +747,23 @@ export default function App() {
         customPeriodBudget: budgetNum
       });
       setIsEditingActiveBudgetBlock(false);
-      showNotification("Monthly budget & billing period updated successfully!", "success");
+      showNotification("Monthly budget & cycle dates updated successfully!", "success");
     } catch (err: any) {
       console.error(err);
       showNotification("Failed to update budget settings: " + err.message, "warning");
     }
   };
 
-  // Bulk Import handler
+  // File import
   const handleBulkImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
-
     try {
       const parsedExpenses = await parseImportFile(file);
       if (parsedExpenses.length === 0) {
-        showNotification("No valid expenses found to import.", "info");
+        showNotification("No valid records found in the uploaded file.", "info");
         return;
       }
-
-      // Add each parsed expense to Firestore in batch simulated
       const collRef = collection(db, "expenses");
       let count = 0;
       for (const item of parsedExpenses) {
@@ -779,163 +774,207 @@ export default function App() {
         });
         count++;
       }
-
-      showNotification(`Successfully bulk-imported ${count} expenses!`, "success");
+      showNotification(`Imported ${count} expenses into your ledger!`, "success");
     } catch (err: any) {
       console.error(err);
       showNotification(err.message || "Failed to import expenses.", "warning");
     } finally {
-      // Clear target input value
       e.target.value = "";
     }
   };
 
-  // Filter application helper
+  // Currency & Budget Variables
   const currencySymbol = profile?.currency || "₹";
   const activeBudget = profile?.monthlyBudget || 15000;
+  const isCustomCycleActive = !!profile?.customPeriodEnabled;
+  const customCycleBudget = profile?.customPeriodBudget || 15000;
+  const customCycleStart = profile?.customPeriodStartDate || "2026-06-23";
+  const customCycleEnd = profile?.customPeriodEndDate || "2026-07-23";
 
-  // Memoize expenses grouped by date for fast calendar queries
-  const expensesByDate = React.useMemo(() => {
+  // Calculate day-by-day mapping for calendar
+  const expensesByDate = useMemo(() => {
     const map: Record<string, Expense[]> = {};
     expenses.forEach((exp) => {
-      if (!map[exp.date]) {
-        map[exp.date] = [];
-      }
+      if (!map[exp.date]) map[exp.date] = [];
       map[exp.date].push(exp);
     });
     return map;
   }, [expenses]);
 
-  // Calendar grid cell generator
-  const getCalendarCells = () => {
+  // Calendar cells generator (42 cells standard matrix)
+  const calendarCells = useMemo(() => {
     const cells = [];
     const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
     const totalDays = new Date(calendarYear, calendarMonth + 1, 0).getDate();
     const prevMonthTotalDays = new Date(calendarYear, calendarMonth, 0).getDate();
 
-    // Previous month padding cells
     for (let i = firstDay - 1; i >= 0; i--) {
       const prevDay = prevMonthTotalDays - i;
       const prevMonth = calendarMonth === 0 ? 11 : calendarMonth - 1;
       const prevYear = calendarMonth === 0 ? calendarYear - 1 : calendarYear;
       const dateStr = `${prevYear}-${String(prevMonth + 1).padStart(2, "0")}-${String(prevDay).padStart(2, "0")}`;
-      cells.push({
-        day: prevDay,
-        isCurrentMonth: false,
-        dateStr,
-      });
+      cells.push({ day: prevDay, isCurrentMonth: false, dateStr });
     }
 
-    // Current month days
     for (let day = 1; day <= totalDays; day++) {
       const dateStr = `${calendarYear}-${String(calendarMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      cells.push({
-        day,
-        isCurrentMonth: true,
-        dateStr,
-      });
+      cells.push({ day, isCurrentMonth: true, dateStr });
     }
 
-    // Next month padding cells to complete standard 42-cell grid
-    const totalGridCells = 42;
-    const remaining = totalGridCells - cells.length;
+    const remaining = 42 - cells.length;
     for (let day = 1; day <= remaining; day++) {
       const nextMonth = calendarMonth === 11 ? 0 : calendarMonth + 1;
       const nextYear = calendarMonth === 11 ? calendarYear + 1 : calendarYear;
       const dateStr = `${nextYear}-${String(nextMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      cells.push({
-        day,
-        isCurrentMonth: false,
-        dateStr,
-      });
+      cells.push({ day, isCurrentMonth: false, dateStr });
     }
 
     return cells;
+  }, [calendarYear, calendarMonth]);
+
+  // Dynamic daily spending intensity classification:
+  // Low (Green) vs Average (Orange) vs Spends More (Red)
+  const getDaySpendingTier = (dayTotal: number): "low" | "average" | "high" | null => {
+    if (dayTotal <= 0) return null;
+    const dailyBudget = activeBudget > 0 ? (activeBudget / 30) : 500;
+    const lowThreshold = Math.max(100, Math.round(dailyBudget * 0.4)); // e.g. ₹200 for ₹15,000 budget
+    const avgThreshold = Math.max(250, Math.round(dailyBudget * 1.0)); // e.g. ₹500 for ₹15,000 budget
+
+    if (dayTotal > avgThreshold) {
+      return "high"; // Spends more -> Red
+    }
+    if (dayTotal >= lowThreshold) {
+      return "average"; // Average -> Orange
+    }
+    return "low"; // Low spendings -> Green
   };
 
-  const filteredExpenses = expenses.filter((e) => {
-    // Description Search
-    const matchesSearch = e.description.toLowerCase().includes(search.toLowerCase()) || 
-                          e.category.toLowerCase().includes(search.toLowerCase()) || 
-                          (e.notes || "").toLowerCase().includes(search.toLowerCase());
-    
-    // Category Filter
-    const matchesCategory = categoryFilter === "All" || e.category === categoryFilter;
+  // Filtered dataset
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter((e) => {
+      const matchesSearch = 
+        e.description.toLowerCase().includes(search.toLowerCase()) || 
+        e.category.toLowerCase().includes(search.toLowerCase()) || 
+        (e.notes || "").toLowerCase().includes(search.toLowerCase());
+      
+      const matchesCategory = categoryFilter === "All" || e.category === categoryFilter;
+      const matchesPayment = paymentFilter === "All" || e.paymentMode === paymentFilter;
 
-    // Payment Filter
-    const matchesPayment = paymentFilter === "All" || e.paymentMode === paymentFilter;
+      const amt = e.amount;
+      const matchesMinAmount = minAmount === "" || amt >= parseFloat(minAmount);
+      const matchesMaxAmount = maxAmount === "" || amt <= parseFloat(maxAmount);
 
-    // Amount Range Filter
-    const amt = e.amount;
-    const matchesMinAmount = minAmount === "" || amt >= parseFloat(minAmount);
-    const matchesMaxAmount = maxAmount === "" || amt <= parseFloat(maxAmount);
+      const expenseDate = new Date(e.date);
+      const yearStr = expenseDate.getFullYear().toString();
+      const monthStr = (expenseDate.getMonth() + 1).toString().padStart(2, "0");
 
-    // Date / Period Filter
-    // Date is format YYYY-MM-DD
-    const expenseDate = new Date(e.date);
-    const yearStr = expenseDate.getFullYear().toString();
-    const monthStr = (expenseDate.getMonth() + 1).toString().padStart(2, "0"); // "01", "02"...
+      const matchesYear = yearFilter === "All" || yearStr === yearFilter;
+      const matchesMonth = monthFilter === "All" || monthStr === monthFilter;
 
-    const matchesYear = yearFilter === "All" || yearStr === yearFilter;
-    const matchesMonth = monthFilter === "All" || monthStr === monthFilter;
+      const matchesStartDate = startDateFilter === "" || e.date >= startDateFilter;
+      const matchesEndDate = endDateFilter === "" || e.date <= endDateFilter;
 
-    // Custom manual date range filters
-    const matchesStartDate = startDateFilter === "" || e.date >= startDateFilter;
-    const matchesEndDate = endDateFilter === "" || e.date <= endDateFilter;
+      return matchesSearch && matchesCategory && matchesPayment && matchesMinAmount && matchesMaxAmount && matchesYear && matchesMonth && matchesStartDate && matchesEndDate;
+    });
+  }, [expenses, search, categoryFilter, paymentFilter, minAmount, maxAmount, yearFilter, monthFilter, startDateFilter, endDateFilter]);
 
-    return matchesSearch && matchesCategory && matchesPayment && matchesMinAmount && matchesMaxAmount && matchesYear && matchesMonth && matchesStartDate && matchesEndDate;
-  });
-
-  // Calculate high-level financial stats based on filtered selection
+  // Aggregated Stats
   const totalSpentFiltered = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const noOfTransactions = filteredExpenses.length;
-  
-  // Calculate stats based specifically on the current calendar month
-  const currentMonthStr = new Date().toISOString().substring(0, 7); // "YYYY-MM"
-  const currentMonthExpenses = expenses.filter(e => e.date.substring(0, 7) === currentMonthStr);
+  const highestExpense = filteredExpenses.length > 0 ? Math.max(...filteredExpenses.map(e => e.amount)) : 0;
+  const averageDailySpent = filteredExpenses.length > 0 ? (totalSpentFiltered / filteredExpenses.length) : 0;
+
+  // Monthly statistics
+  const currentMonthStr = new Date().toISOString().substring(0, 7);
+  const currentMonthExpenses = useMemo(() => {
+    return expenses.filter(e => e.date.substring(0, 7) === currentMonthStr);
+  }, [expenses, currentMonthStr]);
+
   const totalSpentCurrentMonth = currentMonthExpenses.reduce((sum, e) => sum + e.amount, 0);
   const remainingBudget = Math.max(0, activeBudget - totalSpentCurrentMonth);
-  const currentMonthTransactionsCount = currentMonthExpenses.length;
+  const monthProgressPct = activeBudget > 0 ? (totalSpentCurrentMonth / activeBudget) * 100 : 0;
 
-  // Extract Category distribution for Pie Chart (filtered dataset)
-  const categoryChartData = Object.entries(
-    filteredExpenses.reduce((acc: Record<string, number>, e) => {
+  // Custom cycle computations
+  const customCycleExpenses = useMemo(() => {
+    return expenses.filter(e => e.date >= customCycleStart && e.date <= customCycleEnd);
+  }, [expenses, customCycleStart, customCycleEnd]);
+  const customCycleSpent = customCycleExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const customCycleRemaining = Math.max(0, customCycleBudget - customCycleSpent);
+  const customCycleProgress = customCycleBudget > 0 ? (customCycleSpent / customCycleBudget) * 100 : 0;
+
+  const getDaysRemaining = (endStr: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const end = new Date(endStr);
+    end.setHours(0, 0, 0, 0);
+    const diffTime = end.getTime() - today.getTime();
+    return Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+  };
+
+  // Safe daily allowance
+  const daysLeftInMonth = (() => {
+    const now = new Date();
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    return Math.max(1, lastDay - now.getDate());
+  })();
+
+  const activeDaysRemaining = isCustomCycleActive ? getDaysRemaining(customCycleEnd) : daysLeftInMonth;
+  const activeRemainingBalance = isCustomCycleActive ? customCycleRemaining : remainingBudget;
+  const safeDailySpend = activeDaysRemaining > 0 ? (activeRemainingBalance / activeDaysRemaining) : 0;
+
+  // Today & weekly spent
+  const getLocalDateString = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const date = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${date}`;
+  };
+  const todayStr = getLocalDateString(new Date());
+  const todaySpent = expenses.filter(e => e.date === todayStr).reduce((sum, e) => sum + e.amount, 0);
+
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const weeklySpent = expenses
+    .filter(e => e.date >= getLocalDateString(sevenDaysAgo) && e.date <= todayStr)
+    .reduce((sum, e) => sum + e.amount, 0);
+
+  // Category Chart Data
+  const categoryChartData = useMemo(() => {
+    const raw = filteredExpenses.reduce((acc: Record<string, number>, e) => {
       acc[e.category] = (acc[e.category] || 0) + e.amount;
       return acc;
-    }, {})
-  ).map(([name, value]) => ({ name, value: value as number }));
+    }, {});
+    return Object.entries(raw).map(([name, value]) => ({ name, value }));
+  }, [filteredExpenses]);
 
-  // Dynamic analytic calculations
-  const highestExpense = filteredExpenses.length > 0 ? Math.max(...filteredExpenses.map(e => e.amount)) : 0;
-  const lowestExpense = filteredExpenses.length > 0 ? Math.min(...filteredExpenses.map(e => e.amount)) : 0;
-  const averageDailySpent = filteredExpenses.length > 0 ? (totalSpentFiltered / (filteredExpenses.length || 1)) : 0;
+  // Trend Chart Data
+  const trendChartData = useMemo(() => {
+    const raw = filteredExpenses.reduce((acc: Record<string, number>, e) => {
+      acc[e.date] = (acc[e.date] || 0) + e.amount;
+      return acc;
+    }, {});
+    return Object.entries(raw)
+      .map(([date, amount]) => ({ date, amount }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [filteredExpenses]);
 
-  // Group trend chart data by Date (Line Chart)
-  const trendChartRaw = filteredExpenses.reduce((acc: Record<string, number>, e) => {
-    acc[e.date] = (acc[e.date] || 0) + e.amount;
-    return acc;
-  }, {});
-  // Convert to array and sort chronologically
-  const trendChartData = Object.entries(trendChartRaw)
-    .map(([date, amount]) => ({ date, amount }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+  // Monthly Bar Chart Data
+  const monthlyBarData = useMemo(() => {
+    const raw = expenses.reduce((acc: Record<string, number>, e) => {
+      const monthYear = e.date.substring(0, 7);
+      acc[monthYear] = (acc[monthYear] || 0) + e.amount;
+      return acc;
+    }, {});
+    return Object.entries(raw)
+      .map(([month, amount]) => {
+        const [y, m] = month.split("-");
+        const monthLabel = new Date(parseInt(y), parseInt(m) - 1).toLocaleString('default', { month: 'short' }) + " " + y;
+        return { month: monthLabel, amount, rawDate: month };
+      })
+      .sort((a, b) => a.rawDate.localeCompare(b.rawDate))
+      .slice(-6);
+  }, [expenses]);
 
-  // Monthly Comparison grouping for Bar Chart
-  const monthlyBarRaw = expenses.reduce((acc: Record<string, number>, e) => {
-    const monthYear = e.date.substring(0, 7); // YYYY-MM
-    acc[monthYear] = (acc[monthYear] || 0) + e.amount;
-    return acc;
-  }, {});
-  const monthlyBarData = Object.entries(monthlyBarRaw)
-    .map(([month, amount]) => {
-      const [y, m] = month.split("-");
-      const monthLabel = new Date(parseInt(y), parseInt(m) - 1).toLocaleString('default', { month: 'short' }) + " " + y;
-      return { month: monthLabel, amount, rawDate: month };
-    })
-    .sort((a, b) => a.rawDate.localeCompare(b.rawDate))
-    .slice(-6); // Limit to last 6 months
-
-  // Get total spent and top transaction for a specific raw month (e.g., "2026-07")
+  // Detail for clicked month
   const getMonthlyDetails = (rawMonth: string) => {
     const monthExpenses = expenses.filter(e => e.date.substring(0, 7) === rawMonth);
     const total = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -945,1721 +984,1342 @@ export default function App() {
     return { total, topTx, count: monthExpenses.length };
   };
 
-  // Real-time spending overview (Daily/weekly/monthly)
-  const getLocalDateString = (d: Date) => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const date = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${date}`;
-  };
-  
-  const todayStr = getLocalDateString(new Date());
-  
-  // Calculate yesterday's date string
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = getLocalDateString(yesterday);
-  
-  // 1. Today's Spent
-  const todaySpent = expenses
-    .filter(e => e.date === todayStr)
-    .reduce((sum, e) => sum + e.amount, 0);
+  // Available Categories & Years
+  const availableCategories = useMemo(() => {
+    return Array.from(new Set([
+      "Food", "PG", "Travel", "Auto", "Cab", "Tea", "Shopping", "Medicine", "Fuel", "Entertainment", "Bills", "Miscellaneous",
+      ...(profile?.customCategories || []),
+      ...expenses.map(e => e.category)
+    ]));
+  }, [profile, expenses]);
 
-  // 2. Yesterday's Spent
-  const yesterdaySpent = expenses
-    .filter(e => e.date === yesterdayStr)
-    .reduce((sum, e) => sum + e.amount, 0);
+  const availableYears = useMemo(() => {
+    return Array.from(new Set(
+      expenses.map((e) => new Date(e.date).getFullYear().toString())
+    )).sort((a: string, b: string) => b.localeCompare(a));
+  }, [expenses]);
 
-  // 3. Weekly Spent (Last 7 days, including today)
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  const sevenDaysAgoStr = getLocalDateString(sevenDaysAgo);
-  const weeklySpent = expenses
-    .filter(e => e.date >= sevenDaysAgoStr && e.date <= todayStr)
-    .reduce((sum, e) => sum + e.amount, 0);
-
-  // Custom tracking period/cycle calculations (e.g., 23 June to 23 July)
-  const isCustomCycleActive = !!profile?.customPeriodEnabled;
-  const customCycleBudget = profile?.customPeriodBudget || 15000;
-  const customCycleStart = profile?.customPeriodStartDate || "2026-06-23";
-  const customCycleEnd = profile?.customPeriodEndDate || "2026-07-23";
-
-  const customCycleExpenses = expenses.filter(
-    (e) => e.date >= customCycleStart && e.date <= customCycleEnd
-  );
-  const customCycleSpent = customCycleExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const customCycleRemaining = Math.max(0, customCycleBudget - customCycleSpent);
-  const customCycleProgress = customCycleBudget > 0 ? (customCycleSpent / customCycleBudget) * 100 : 0;
-
-  // Calculate days remaining in custom cycle
-  const getDaysRemainingOrDiff = (endStr: string) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const end = new Date(endStr);
-    end.setHours(0, 0, 0, 0);
-    const diffTime = end.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
-  };
-  const customCycleDaysLeft = getDaysRemainingOrDiff(customCycleEnd);
-
-  // Comparison (Period A vs Period B)
-  const getPeriodStats = (start: string, end: string) => {
-    if (!start || !end) return { total: 0, count: 0, avg: 0 };
-    const filtered = expenses.filter(e => e.date >= start && e.date <= end);
-    const total = filtered.reduce((sum, e) => sum + e.amount, 0);
-    const count = filtered.length;
-    const avg = count > 0 ? total / count : 0;
-    return { total, count, avg };
-  };
-
-  const compStatsA = getPeriodStats(compStartA, compEndA);
-  const compStatsB = getPeriodStats(compStartB, compEndB);
-
-  const calculatePctDiff = (valA: number, valB: number) => {
-    if (valA === 0) return valB > 0 ? 100 : 0;
-    return ((valB - valA) / valA) * 100;
-  };
-
-  const compTotalDiff = calculatePctDiff(compStatsA.total, compStatsB.total);
-  const compCountDiff = calculatePctDiff(compStatsA.count, compStatsB.count);
-  const compAvgDiff = calculatePctDiff(compStatsA.avg, compStatsB.avg);
-
-  // Default values for comparison dates setup effect
-  useEffect(() => {
-    if (!compStartA && expenses.length > 0) {
-      const now = new Date();
-      
-      // Period B: Current month to today
-      const yearB = now.getFullYear();
-      const monthB = String(now.getMonth() + 1).padStart(2, '0');
-      const startB = `${yearB}-${monthB}-01`;
-      
-      const lastDayB = new Date(yearB, now.getMonth() + 1, 0).getDate();
-      const endB = `${yearB}-${monthB}-${String(lastDayB).padStart(2, '0')}`;
-      
-      // Period A: Previous month
-      const prevMonthDate = new Date();
-      prevMonthDate.setMonth(now.getMonth() - 1);
-      const yearA = prevMonthDate.getFullYear();
-      const monthA = String(prevMonthDate.getMonth() + 1).padStart(2, '0');
-      const startA = `${yearA}-${monthA}-01`;
-      
-      const lastDayA = new Date(yearA, prevMonthDate.getMonth() + 1, 0).getDate();
-      const endA = `${yearA}-${monthA}-${String(lastDayA).padStart(2, '0')}`;
-      
-      setCompStartA(startA);
-      setCompEndA(endA);
-      setCompStartB(startB);
-      setCompEndB(endB);
-    }
-  }, [expenses, compStartA]);
-
-  // Unique lists for filter dropdown selections
-  const availableCategories = Array.from(new Set([
-    "Food", "PG", "Travel", "Auto", "Cab", "Tea", "Shopping", "Medicine", "Fuel", "Entertainment", "Bills", "Miscellaneous",
-    ...(profile?.customCategories || []),
-    ...expenses.map(e => e.category)
-  ]));
-
-  const availableYears = Array.from(new Set(
-    expenses.map((e) => new Date(e.date).getFullYear().toString())
-  )).sort((a: string, b: string) => b.localeCompare(a));
-
+  // Early return during initial auth check
   if (loading && !user) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 text-slate-100">
-        <div className="w-12 h-12 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin mb-4" />
-        <p className="text-sm text-slate-400">Loading TMK secure workspaces...</p>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#07090e] text-slate-100">
+        <div className="w-10 h-10 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mb-3" />
+        <p className="text-xs font-mono uppercase tracking-widest text-slate-400">Loading TMK Ledger...</p>
       </div>
     );
   }
 
   if (!user) {
-    return <AuthScreen onSuccess={() => showNotification("Welcome back! App initialized.", "success")} />;
+    return <AuthScreen onSuccess={() => showNotification("Authenticated successfully", "success")} />;
   }
 
-  return (
-    <div className={`min-h-screen ${darkMode ? "bg-[#020617] text-[#f8fafc]" : "bg-slate-50 text-slate-900"} transition-colors duration-300 relative`}>
-      
-      {/* Decorative Grid Mesh */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#8080800a_1px,transparent_1px),linear-gradient(to_bottom,#8080800a_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
+  // Active ring metrics
+  const displayLimit = isCustomCycleActive ? customCycleBudget : activeBudget;
+  const displaySpent = isCustomCycleActive ? customCycleSpent : totalSpentCurrentMonth;
+  const displayRemaining = isCustomCycleActive ? customCycleRemaining : remainingBudget;
+  const displayProgress = isCustomCycleActive ? customCycleProgress : monthProgressPct;
+  const isOverBudget = displaySpent > displayLimit;
 
-      {/* Real-time Toast Notifications */}
+  return (
+    <div className={`min-h-screen ${darkMode ? "grid-bg-dark text-slate-100" : "grid-bg-light text-slate-900"} font-sans transition-colors duration-200 relative selection:bg-emerald-500/20 selection:text-emerald-400 overflow-x-hidden`}>
+      
+      {/* Dynamic ambient colored aura glows */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-36 left-1/4 w-[550px] h-[400px] bg-indigo-500/[0.06] rounded-full blur-[140px]" />
+        <div className="absolute top-1/3 -right-20 w-[450px] h-[400px] bg-teal-500/[0.05] rounded-full blur-[140px]" />
+        <div className="absolute -bottom-24 left-1/3 w-[500px] h-[350px] bg-violet-500/[0.05] rounded-full blur-[140px]" />
+      </div>
+
+      {/* Global Toast Alert */}
       <AnimatePresence>
         {notification && (
           <motion.div
-            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            initial={{ opacity: 0, y: -24, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 p-4 rounded-xl shadow-2xl border flex items-center gap-3 max-w-lg ${
+            exit={{ opacity: 0, y: -24, scale: 0.96 }}
+            className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 py-2.5 px-4 rounded-2xl shadow-2xl border flex items-center gap-3 backdrop-blur-xl ${
               notification.type === "warning"
-                ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
+                ? "bg-rose-950/85 border-rose-500/30 text-rose-300 shadow-rose-950/50"
                 : notification.type === "info"
-                ? "bg-blue-500/10 border-blue-500/30 text-blue-300"
-                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                ? "bg-slate-900/90 border-cyan-500/30 text-cyan-300 shadow-cyan-950/50"
+                : "bg-slate-900/90 border-emerald-500/30 text-emerald-300 shadow-emerald-950/50"
             }`}
           >
             {notification.type === "warning" ? (
-              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
             ) : notification.type === "info" ? (
-              <Info className="w-5 h-5 shrink-0" />
+              <Info className="w-4 h-4 text-cyan-400 shrink-0" />
             ) : (
-              <CheckCircle className="w-5 h-5 shrink-0" />
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             )}
-            <span className="text-xs font-medium">{notification.message}</span>
+            <span className="text-xs font-medium tracking-wide">{notification.message}</span>
             <button
               onClick={() => setNotification(null)}
-              className="p-1 hover:bg-white/10 rounded"
+              className="p-1 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
             </button>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* APP HEADER */}
-      <header className={`sticky top-0 z-40 backdrop-blur-md border-b ${
-        darkMode ? "bg-[#0f172a]/80 border-slate-800" : "bg-white/80 border-slate-200"
+      {/* TOP BAR CONTRACT: STRICT 1-ROW, 3-ZONE LAYOUT */}
+      <header className={`sticky top-0 z-40 backdrop-blur-xl border-b transition-colors ${
+        darkMode ? "bg-[#080d1a]/90 border-white/[0.08]" : "bg-white/95 border-slate-200 light-surface"
       }`}>
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-15 sm:h-16 flex items-center justify-between gap-2 sm:gap-4">
           
-          {/* Logo & Brand */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-emerald-500 flex items-center justify-center text-slate-950 shadow-lg shadow-emerald-500/20 shrink-0">
-              <Wallet2 className="w-4 h-4 sm:w-5 sm:h-5" />
+          {/* ZONE 1: BRAND EMBLEM & CLOUD STATUS */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-cyan-400 p-[1px] shadow-lg shadow-emerald-500/20 shrink-0">
+              <div className={`w-full h-full ${darkMode ? "bg-[#080d1a]" : "bg-white"} rounded-[11px] flex items-center justify-center text-emerald-400`}>
+                <Wallet2 className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+              </div>
             </div>
             <div>
-              <h1 className={`text-sm sm:text-base font-bold tracking-tight flex items-center gap-1 sm:gap-1.5 ${
-                darkMode ? "text-white" : "text-slate-900"
-              }`}>
-                TMK Expense <span className="hidden sm:inline">Tracker</span>
-                <span className="hidden min-[450px]:inline-block text-[10px] bg-emerald-500/10 text-emerald-400 font-semibold px-1.5 py-0.5 rounded-full border border-emerald-500/20">
-                  Analytics
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <span className={`font-extrabold text-xs sm:text-sm tracking-tight font-sans ${darkMode ? "text-white" : "text-slate-900"}`}>
+                  TMK <span className="hidden sm:inline">LEDGER</span>
                 </span>
-              </h1>
-              <p className="text-[9px] sm:text-[10px] text-slate-400 font-medium leading-none mt-0.5">Smart Budgeting</p>
+                <span className="text-[9px] sm:text-[10px] font-mono uppercase tracking-wider text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-1.5 py-0.5 rounded-full font-semibold">
+                  PRO
+                </span>
+              </div>
+              <p className="text-[9px] sm:text-[10px] text-slate-400 hidden xs:flex items-center gap-1 font-mono">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live Cloud Sync
+              </p>
             </div>
           </div>
 
-          {/* Quick Actions Container */}
-          <div className="flex items-center gap-1.5 sm:gap-3">
+          {/* ZONE 2: SEGMENTED VIEW SWITCHER TABS (Desktop / Tablet) */}
+          <nav className="hidden lg:flex items-center p-1 rounded-2xl bg-white/[0.04] border border-white/[0.08] text-xs font-semibold">
+            <button
+              onClick={() => setActiveTab("overview")}
+              className={`px-3.5 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+                activeTab === "overview"
+                  ? "bg-emerald-500 text-slate-950 shadow-md font-bold"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Command Center</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("calendar")}
+              className={`px-3.5 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+                activeTab === "calendar"
+                  ? "bg-sky-500 text-slate-950 shadow-md font-bold"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Calendar</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("analytics")}
+              className={`px-3.5 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+                activeTab === "analytics"
+                  ? "bg-violet-500 text-white shadow-md font-bold"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <PieIcon className="w-3.5 h-3.5" />
+              <span>Analytics</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("transactions")}
+              className={`px-3.5 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 ${
+                activeTab === "transactions"
+                  ? "bg-cyan-500 text-slate-950 shadow-md font-bold"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Receipt className="w-3.5 h-3.5" />
+              <span>Spreadsheet</span>
+            </button>
+          </nav>
+
+          {/* ZONE 3: ACTIONS & CONTROLS */}
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             
-            {/* Gemini Insights Launch Icon */}
+            {/* Superstar Rajini Punch Button */}
+            <button
+              id="thalaivar-punch-trigger-btn"
+              onClick={() => {
+                const sampleAmount = expenses.length > 0 ? expenses[0].amount : 500;
+                const sampleCategory = expenses.length > 0 ? expenses[0].category : "Tea & Mass";
+                setThalaivarExpense({
+                  amount: sampleAmount,
+                  category: sampleCategory,
+                  description: "Thalaivar Punch Check"
+                });
+                setIsThalaivarPopupOpen(true);
+              }}
+              className="h-8 sm:h-9 px-2 sm:px-2.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-orange-500/10 hover:from-amber-500/25 hover:to-yellow-500/20 border border-amber-500/35 text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-sm shadow-amber-500/10"
+              title="Superstar Rajinikanth Dialogues"
+            >
+              <span className="text-sm">🕶️</span>
+              <span className="hidden md:inline font-mono">Thalaivar</span>
+            </button>
+
+            {/* Quick Gemini AI Launcher */}
             <button
               id="ai-insights-trigger-btn"
               onClick={() => setIsAiOpen(true)}
-              className="relative p-2 sm:p-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold rounded-xl text-xs transition duration-200 flex items-center gap-1.5 shadow-lg shadow-emerald-500/10 hover:scale-[1.02] cursor-pointer shrink-0"
+              className="h-8 sm:h-9 px-2 sm:px-2.5 rounded-xl bg-gradient-to-r from-teal-500/15 to-emerald-500/10 hover:from-teal-500/25 hover:to-emerald-500/20 border border-teal-500/35 text-teal-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-sm shadow-teal-500/10"
+              title="Gemini AI Financial Advisor"
             >
-              <Sparkles className="w-4 h-4 animate-pulse shrink-0" />
-              <span className="hidden md:inline">AI Advisor</span>
+              <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-400" />
+              <span className="hidden md:inline font-mono">Gemini AI</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-ping hidden lg:inline-block" />
             </button>
 
-            {/* Dark Mode Toggle */}
+            {/* Dark/Light mode toggle */}
             <button
               id="dark-mode-toggle-btn"
               onClick={() => setDarkMode(!darkMode)}
-              className={`p-2 sm:p-2.5 rounded-xl border transition-all hover:scale-[1.01] cursor-pointer shrink-0 ${
-                darkMode 
-                  ? "bg-slate-850 border-slate-700/60 text-emerald-400 hover:bg-slate-800" 
-                  : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-              }`}
+              className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.08] text-slate-300 transition cursor-pointer"
+              title="Toggle theme"
             >
-              {darkMode ? <Sun className="w-4 h-4 sm:w-4.5 sm:h-4.5" /> : <Moon className="w-4 h-4 sm:w-4.5 sm:h-4.5" />}
+              {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-400" />}
             </button>
 
-            {/* User Profile Action Menu Trigger */}
+            {/* Profile / Settings Button */}
             <button
               id="user-profile-menu-trigger"
-              onClick={() => setIsProfileOpen(!isProfileOpen)}
-              className={`flex items-center gap-1.5 p-1.5 sm:pl-3 border rounded-xl transition cursor-pointer shrink-0 ${
-                darkMode 
-                  ? "bg-slate-850 border-slate-700/60 text-slate-200 hover:bg-slate-850/80" 
-                  : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-              }`}
+              onClick={() => setIsProfileOpen(true)}
+              className="h-8 sm:h-9 px-1.5 sm:px-2 rounded-xl border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.08] text-slate-200 transition cursor-pointer flex items-center gap-1.5"
+              title="Settings"
             >
-              <span className="hidden md:inline text-xs font-semibold max-w-[100px] truncate">
-                {profile?.name || "Settings"}
-              </span>
-              <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold text-xs border border-emerald-500/20 shrink-0">
+              <div className="w-5 h-5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-[10px]">
                 {profile?.name?.charAt(0).toUpperCase() || "U"}
               </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <Settings className="w-3.5 h-3.5 text-slate-400 hidden sm:inline" />
             </button>
 
-            {/* Logout Trigger */}
+            {/* Gmail AI Reports Button */}
+            <button
+              id="gmail-reports-header-btn"
+              onClick={() => setIsGmailModalOpen(true)}
+              className="h-8 sm:h-9 px-2 sm:px-2.5 rounded-xl bg-gradient-to-r from-rose-500/15 via-red-500/10 to-orange-500/10 hover:from-rose-500/25 hover:to-red-500/20 border border-rose-500/35 text-rose-300 font-semibold text-xs flex items-center gap-1.5 shadow-sm shadow-rose-500/10 transition cursor-pointer"
+              title="Gmail AI Reports (Weekly & Monthly)"
+            >
+              <Mail className="w-3.5 h-3.5 text-rose-400 stroke-[2.2]" />
+              <span className="hidden md:inline font-mono">Gmail AI</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            </button>
+
+            {/* Scan Bill / Receipt (AI OCR) Button */}
+            <button
+              id="scan-bill-header-btn"
+              onClick={() => setIsReceiptScannerOpen(true)}
+              className="h-8 sm:h-9 px-2.5 sm:px-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-teal-500/20 hover:from-cyan-500/30 hover:to-teal-500/30 border border-cyan-500/40 text-cyan-300 font-bold text-xs flex items-center gap-1.5 shadow-md shadow-cyan-500/10 transition hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+              title="Scan physical bill or receipt with AI OCR"
+            >
+              <ScanLine className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400 stroke-[2.5]" />
+              <span className="hidden sm:inline">Scan Bill</span>
+            </button>
+
+            {/* Primary Action Button */}
+            <button
+              id="add-expense-trigger-btn"
+              onClick={() => {
+                setExpenseToEdit(null);
+                setIsModalOpen(true);
+              }}
+              className="h-8 sm:h-9 px-2.5 sm:px-3 rounded-xl bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 hover:from-emerald-300 hover:to-teal-300 text-slate-950 font-bold text-xs flex items-center gap-1 shadow-lg shadow-emerald-500/25 transition hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[3]" />
+              <span className="hidden sm:inline">Record</span>
+            </button>
+
+            {/* Sign Out */}
             <button
               id="logout-header-btn"
               onClick={handleLogout}
+              className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl border border-white/[0.08] hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 transition cursor-pointer"
               title="Sign Out"
-              className="p-2 sm:p-2.5 rounded-xl hover:bg-rose-500/10 text-rose-400 transition cursor-pointer shrink-0"
             >
-              <LogOut className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+              <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
+        </div>
 
+        {/* Mobile secondary tab strip (4-column balanced grid) */}
+        <div className={`lg:hidden grid grid-cols-4 gap-1 p-1.5 border-t backdrop-blur-md text-[11px] font-semibold ${
+          darkMode ? "border-white/[0.06] bg-[#070b14]/90" : "border-slate-200 bg-slate-100/95"
+        }`}>
+          <button 
+            onClick={() => setActiveTab("overview")} 
+            className={`py-1.5 px-1 rounded-xl flex items-center justify-center gap-1 transition ${
+              activeTab === "overview" 
+                ? "bg-emerald-500 text-slate-950 font-bold shadow-md shadow-emerald-500/20" 
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Overview</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab("calendar")} 
+            className={`py-1.5 px-1 rounded-xl flex items-center justify-center gap-1 transition ${
+              activeTab === "calendar" 
+                ? "bg-sky-500 text-slate-950 font-bold shadow-md shadow-sky-500/20" 
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Calendar</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab("analytics")} 
+            className={`py-1.5 px-1 rounded-xl flex items-center justify-center gap-1 transition ${
+              activeTab === "analytics" 
+                ? "bg-violet-500 text-white font-bold shadow-md shadow-violet-500/20" 
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <PieIcon className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Analytics</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab("transactions")} 
+            className={`py-1.5 px-1 rounded-xl flex items-center justify-center gap-1 transition ${
+              activeTab === "transactions" 
+                ? "bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20" 
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Receipt className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Ledger</span>
+          </button>
         </div>
       </header>
 
-      {/* MAIN SCREEN BENTO GRID */}
-      <motion.main
-        variants={containerVariants}
-        initial="hidden"
-        animate="show"
-        className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-12 gap-5"
-      >
-        
-        {/* ROW 1: 4 BENTO STATS CARDS */}
-        <motion.div variants={cardVariants} className={`col-span-12 sm:col-span-6 lg:col-span-3 transition-all duration-300 flex items-center justify-between ${
-          darkMode ? "bento-card-dark" : "bento-card-light"
-        }`}>
-          <div>
-            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Total Spent (Filtered)</p>
-            <h3 className={`text-2xl font-extrabold mt-2 ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>
-              {currencySymbol}{totalSpentFiltered.toLocaleString()}
-            </h3>
-            <p className="text-[10px] text-slate-500 mt-1">Based on active filters</p>
-          </div>
-          <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-        </motion.div>
+      {/* MAIN CONTAINER VIEWPORT */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 
-        <motion.div variants={cardVariants} className={`col-span-12 sm:col-span-6 lg:col-span-3 transition-all duration-300 flex items-center justify-between ${
-          darkMode ? "bento-card-dark" : "bento-card-light"
-        }`}>
-          <div>
-            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Top Spending Item</p>
-            <h3 className={`text-2xl font-extrabold mt-2 truncate max-w-[160px] ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>
-              {currencySymbol}{highestExpense.toLocaleString()}
-            </h3>
-            <p className="text-[10px] text-slate-500 mt-1">Highest logged single cost</p>
-          </div>
-          <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-xl">
-            <TrendingUp className="w-5 h-5 rotate-90" />
-          </div>
-        </motion.div>
+        {/* =========================================================================
+            SECTION: EXECUTIVE HERO BENTO (Rendered on 'overview' and 'analytics')
+           ========================================================================= */}
+        {(activeTab === "overview" || activeTab === "analytics") && (
+          <div className="grid grid-cols-12 gap-5">
 
-        <motion.div variants={cardVariants} className={`col-span-12 sm:col-span-6 lg:col-span-3 transition-all duration-300 flex items-center justify-between ${
-          darkMode ? "bento-card-dark" : "bento-card-light"
-        }`}>
-          <div>
-            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Avg Spending (Filtered)</p>
-            <h3 className={`text-2xl font-extrabold mt-2 ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>
-              {currencySymbol}{averageDailySpent.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-            </h3>
-            <p className="text-[10px] text-slate-500 mt-1">Per transaction average cost</p>
-          </div>
-          <div className="p-3 bg-amber-500/10 text-amber-400 rounded-xl">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-        </motion.div>
+            {/* CARD 1: ACTIVE MONTHLY BUDGET GAUGE (HERO COMPONENT FROM USER SCREENSHOT) */}
+            <div className={`col-span-12 lg:col-span-5 ${darkMode ? "bento-card-dark" : "bento-card-light"} flex flex-col justify-between relative group`}>
+              {/* Subtle ambient corner aura */}
+              <div className="absolute -top-16 -right-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
 
-        <motion.div variants={cardVariants} className={`col-span-12 sm:col-span-6 lg:col-span-3 transition-all duration-300 flex items-center justify-between ${
-          darkMode ? "bento-card-dark" : "bento-card-light"
-        }`}>
-          <div>
-            <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Transactions Count</p>
-            <h3 className={`text-2xl font-extrabold mt-2 ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>
-              {noOfTransactions}
-            </h3>
-            <p className="text-[10px] text-slate-500 mt-1">Matches active filter parameters</p>
-          </div>
-          <div className="p-3 bg-purple-500/10 text-purple-400 rounded-xl">
-            <Calendar className="w-5 h-5" />
-          </div>
-        </motion.div>
-
-        {/* ROW 1.5: ADVANCED ANALYTICS & BUDGET CYCLES */}
-        <div className="col-span-12 grid grid-cols-12 gap-5">
-          
-          {/* Card 1: Real-time Spending Breakdown */}
-          <motion.div variants={cardVariants} className={`col-span-12 md:col-span-4 transition-all duration-300 p-5 rounded-2xl border flex flex-col justify-between ${
-            darkMode ? "bg-slate-900/60 border-slate-800 text-slate-100" : "bg-white border-slate-200 text-slate-800 shadow-sm"
-          }`}>
-            <div>
-              <div className="flex items-center justify-between mb-3">
+              {/* Header */}
+              <div className="flex items-start justify-between pb-3.5 border-b border-white/[0.08]">
                 <div>
-                  <h3 className={`font-bold text-sm ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>Real-Time Overview</h3>
-                  <p className="text-[11px] text-slate-400">Current dynamic spending cycles</p>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400 animate-pulse" />
+                    <h3 className="text-base sm:text-lg font-bold tracking-tight text-white font-sans">
+                      {isCustomCycleActive ? "Active Cycle Budget" : "Active Monthly Budget"}
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {isCustomCycleActive 
+                      ? `Cycle: ${customCycleStart} to ${customCycleEnd}`
+                      : "Smart budgeting limit check"}
+                  </p>
                 </div>
-                <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg">
-                  <TrendingUp className="w-4 h-4" />
-                </div>
+
+                {/* Inline Edit Trigger */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const currentLimit = isCustomCycleActive ? customCycleBudget : activeBudget;
+                    setActiveBudgetLimitInput(currentLimit.toString());
+                    setActiveBudgetStartInput(profile?.customPeriodStartDate || "2026-06-23");
+                    setActiveBudgetEndInput(profile?.customPeriodEndDate || "2026-07-23");
+                    setActiveBudgetUseCustomInput(isCustomCycleActive);
+                    setIsEditingActiveBudgetBlock(!isEditingActiveBudgetBlock);
+                  }}
+                  className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                    isEditingActiveBudgetBlock
+                      ? "bg-rose-500/15 border-rose-500/35 text-rose-300"
+                      : "bg-white/[0.04] border-white/10 hover:border-emerald-500/40 text-slate-300 hover:text-white"
+                  }`}
+                  title="Configure budget limits and custom cycle dates"
+                >
+                  {isEditingActiveBudgetBlock ? (
+                    <>
+                      <X className="w-3.5 h-3.5" />
+                      <span>Close</span>
+                    </>
+                  ) : (
+                    <>
+                      <SlidersHorizontal className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="hidden xs:inline">Configure Cycle</span>
+                    </>
+                  )}
+                </button>
               </div>
 
-              <div className="space-y-2.5 mt-2">
-                <div className="flex justify-between items-center text-xs pb-1.5 border-b border-slate-800/20">
-                  <span className="text-slate-400">Today's Spent</span>
-                  <span className={`font-mono font-bold ${todaySpent > 0 ? "text-emerald-400" : "text-slate-400"}`}>
-                    {currencySymbol}{todaySpent.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-xs pb-1.5 border-b border-slate-800/20">
-                  <span className="text-slate-400">Yesterday's Spent</span>
-                  <span className="font-mono text-slate-400 font-semibold">
-                    {currencySymbol}{yesterdaySpent.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-xs pb-1.5 border-b border-slate-800/20">
-                  <span className="text-slate-400">Weekly Spent (Last 7d)</span>
-                  <span className="font-mono text-emerald-400 font-bold">
-                    {currencySymbol}{weeklySpent.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-xs pb-1">
-                  <span className="text-slate-400">Monthly Spent</span>
-                  <span className="font-mono text-indigo-400 font-extrabold">
-                    {currencySymbol}{totalSpentCurrentMonth.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-              </div>
-            </div>
-            
-            <div className="mt-4 pt-2 border-t border-slate-800/20 flex justify-between items-center text-[10px] text-slate-500">
-              <span>Automatic real-time calculation</span>
-              <span className="text-emerald-400 font-semibold flex items-center gap-0.5 animate-pulse">
-                ● Live Sync
-              </span>
-            </div>
-          </motion.div>
-
-          {/* Card 2: Custom Period Cycle Tracker (date customization example set amount 15000) */}
-          <motion.div variants={cardVariants} className={`col-span-12 md:col-span-4 transition-all duration-300 p-5 rounded-2xl border flex flex-col justify-between ${
-            darkMode ? "bg-slate-900/60 border-slate-800 text-slate-100" : "bg-white border-slate-200 text-slate-800 shadow-sm"
-          }`}>
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h3 className={`font-bold text-sm ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>Custom Budget Cycle</h3>
-                  <p className="text-[11px] text-slate-400">Target goal tracking period</p>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    id="toggle-edit-custom-cycle-btn"
-                    type="button"
-                    onClick={() => {
-                      if (!isEditingCustomCycle) {
-                        // Populate with latest saved values
-                        setCustomPeriodEnabled(!!profile?.customPeriodEnabled);
-                        setCustomPeriodStartDate(profile?.customPeriodStartDate || "2026-06-23");
-                        setCustomPeriodEndDate(profile?.customPeriodEndDate || "2026-07-23");
-                        setCustomPeriodBudget(profile?.customPeriodBudget?.toString() || "15000");
-                      }
-                      setIsEditingCustomCycle(!isEditingCustomCycle);
-                    }}
-                    className={`text-[10px] px-2.5 py-1.5 rounded-lg font-extrabold tracking-wide uppercase transition cursor-pointer border ${
-                      isEditingCustomCycle
-                        ? "bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border-rose-500/30"
-                        : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-                    }`}
-                  >
-                    {isEditingCustomCycle ? "Cancel" : "Configure"}
-                  </button>
-                  <div className={`p-2 rounded-lg ${isCustomCycleActive ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-500/10 text-slate-400"}`}>
-                    <Calendar className="w-4 h-4" />
-                  </div>
-                </div>
-              </div>
-
-              {isEditingCustomCycle ? (
-                <div className="space-y-3 mt-1.5">
-                  <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/20">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Configure Period</span>
-                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={customPeriodEnabled}
-                        onChange={(e) => setCustomPeriodEnabled(e.target.checked)}
-                        className="rounded text-emerald-500 bg-slate-950 border-slate-800 focus:ring-emerald-500/20 w-3.5 h-3.5 cursor-pointer"
-                      />
-                      <span className="text-[10px] text-slate-300 font-bold">Enabled</span>
-                    </label>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[9px] text-slate-400 font-bold uppercase mb-0.5">Start Date</label>
-                      <input
-                        type="date"
-                        value={customPeriodStartDate}
-                        onChange={(e) => setCustomPeriodStartDate(e.target.value)}
-                        className={`w-full border rounded-lg p-1.5 text-xs focus:outline-none focus:border-emerald-500 ${
-                          darkMode ? "bg-slate-950/60 border-slate-850 text-slate-300" : "bg-white border-slate-200 text-slate-700"
-                        }`}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[9px] text-slate-400 font-bold uppercase mb-0.5">End Date</label>
-                      <input
-                        type="date"
-                        value={customPeriodEndDate}
-                        onChange={(e) => setCustomPeriodEndDate(e.target.value)}
-                        className={`w-full border rounded-lg p-1.5 text-xs focus:outline-none focus:border-emerald-500 ${
-                          darkMode ? "bg-slate-950/60 border-slate-850 text-slate-300" : "bg-white border-slate-200 text-slate-700"
-                        }`}
-                      />
-                    </div>
-                  </div>
-
+              {/* Body: Either Inline Configuration Form OR The Stunning SVG Gauge */}
+              {isEditingActiveBudgetBlock ? (
+                <div className="py-4 space-y-3.5 my-auto">
                   <div>
-                    <label className="block text-[9px] text-slate-400 font-bold uppercase mb-0.5">Budget Limit ({currencySymbol})</label>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                      Monthly Limit ({currencySymbol})
+                    </label>
                     <input
                       type="number"
-                      value={customPeriodBudget}
-                      onChange={(e) => setCustomPeriodBudget(e.target.value)}
+                      value={activeBudgetLimitInput}
+                      onChange={(e) => setActiveBudgetLimitInput(e.target.value)}
                       placeholder="e.g. 15000"
-                      className={`w-full border rounded-lg p-1.5 text-xs focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? "bg-slate-950/60 border-slate-855 text-slate-300" : "bg-white border-slate-200 text-slate-700"
-                      }`}
+                      className="w-full bg-slate-950/70 border border-white/15 rounded-xl py-2 px-3 text-sm font-mono font-bold text-white focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
-                  <div className="pt-1 flex items-center gap-2">
+                  <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.07] space-y-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={activeBudgetUseCustomInput}
+                        onChange={(e) => setActiveBudgetUseCustomInput(e.target.checked)}
+                        className="rounded text-emerald-500 bg-slate-950 border-slate-700 focus:ring-emerald-500/20 w-4 h-4 cursor-pointer"
+                      />
+                      <span className="text-xs font-semibold text-slate-200">Enable Custom Date Range</span>
+                    </label>
+
+                    {activeBudgetUseCustomInput && (
+                      <div className="grid grid-cols-2 gap-2.5 pt-1.5">
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-mono mb-1">Start Date</label>
+                          <input
+                            type="date"
+                            value={activeBudgetStartInput}
+                            onChange={(e) => setActiveBudgetStartInput(e.target.value)}
+                            className="w-full bg-slate-950 border border-white/10 rounded-lg py-1.5 px-2 text-xs text-white font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-mono mb-1">End Date</label>
+                          <input
+                            type="date"
+                            value={activeBudgetEndInput}
+                            onChange={(e) => setActiveBudgetEndInput(e.target.value)}
+                            className="w-full bg-slate-950 border border-white/10 rounded-lg py-1.5 px-2 text-xs text-white font-mono"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
                     <button
-                      id="save-custom-cycle-inline-btn"
                       type="button"
-                      onClick={() => handleSaveCustomCycleDirectly(customPeriodEnabled, customPeriodStartDate, customPeriodEndDate, customPeriodBudget)}
-                      className="flex-1 py-1.5 px-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg text-xs font-bold text-center cursor-pointer transition shadow-md"
+                      onClick={() => handleSaveActiveBudgetInline(activeBudgetLimitInput, activeBudgetUseCustomInput, activeBudgetStartInput, activeBudgetEndInput)}
+                      className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-bold text-xs transition cursor-pointer shadow-md"
                     >
-                      Save Cycle
+                      Save Budget & Cycle
                     </button>
                     <button
-                      id="cancel-custom-cycle-inline-btn"
                       type="button"
-                      onClick={() => {
-                        setCustomPeriodEnabled(!!profile?.customPeriodEnabled);
-                        setCustomPeriodStartDate(profile?.customPeriodStartDate || "2026-06-23");
-                        setCustomPeriodEndDate(profile?.customPeriodEndDate || "2026-07-23");
-                        setCustomPeriodBudget(profile?.customPeriodBudget?.toString() || "15000");
-                        setIsEditingCustomCycle(false);
-                      }}
-                      className={`py-1.5 px-3 border rounded-lg text-xs font-bold cursor-pointer transition ${
-                        darkMode 
-                          ? "border-slate-800 hover:bg-slate-800 text-slate-400" 
-                          : "border-slate-200 hover:bg-slate-50 text-slate-600"
-                      }`}
+                      onClick={() => setIsEditingActiveBudgetBlock(false)}
+                      className="py-2 px-3 rounded-xl border border-white/10 text-slate-300 text-xs font-semibold hover:bg-white/5 cursor-pointer"
                     >
                       Cancel
                     </button>
                   </div>
                 </div>
-              ) : isCustomCycleActive ? (
-                <div className="space-y-3 mt-1.5">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-400 font-medium">
-                      {new Date(customCycleStart).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} - {new Date(customCycleEnd).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
-                    </span>
-                    <span className="text-emerald-400 font-bold">
-                      Goal: {currencySymbol}{customCycleBudget.toLocaleString()}
-                    </span>
-                  </div>
-
-                  {/* Custom Progress Bar */}
-                  <div>
-                    <div className="w-full bg-slate-800 rounded-full h-2">
-                      <div 
-                        className={`h-2 rounded-full transition-all duration-500 ${
-                          customCycleProgress > 100 
-                            ? "bg-rose-500" 
-                            : customCycleProgress > 80 
-                            ? "bg-amber-500" 
-                            : "bg-emerald-500"
-                        }`}
-                        style={{ width: `${Math.min(100, customCycleProgress)}%` }}
+              ) : (
+                <div className="my-auto py-5 sm:py-6 flex flex-col items-center justify-center">
+                  {/* Breathtaking Circular Gauge (User Screenshot Spec) */}
+                  <div className="relative w-40 h-40 sm:w-48 sm:h-48 flex items-center justify-center">
+                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                      <path
+                        className={darkMode ? "text-slate-800/80" : "text-slate-200"}
+                        strokeWidth="3.4"
+                        stroke="currentColor"
+                        fill="none"
+                        strokeDasharray="100, 100"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                       />
-                    </div>
-                    <div className="flex justify-between items-center text-[10px] text-slate-500 mt-1.5">
-                      <span>Spent: {currencySymbol}{customCycleSpent.toLocaleString()} ({customCycleProgress.toFixed(0)}%)</span>
-                      <span>Left: {currencySymbol}{customCycleRemaining.toLocaleString()}</span>
-                    </div>
-                  </div>
-
-                  {/* Pace Indicator & Days left */}
-                  <div className="flex items-center justify-between text-[11px] bg-slate-950/20 p-2 rounded-xl border border-slate-800/10">
-                    <span className="text-slate-400">
-                      {customCycleDaysLeft > 0 ? `${customCycleDaysLeft} days remaining` : "Cycle completed"}
-                    </span>
-                    {customCycleSpent > customCycleBudget ? (
-                      <span className="text-rose-400 font-bold flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3 shrink-0" /> Over Limit!
-                      </span>
-                    ) : (
-                      <span className="text-emerald-400 font-bold flex items-center gap-1">
-                        <CheckCircle className="w-3 h-3 shrink-0" /> On Track
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-6 text-center text-slate-500 italic text-xs">
-                  <p className="mb-2">Custom cycle budget is inactive.</p>
-                  <button 
-                    onClick={() => {
-                      setCustomPeriodEnabled(true);
-                      setIsEditingCustomCycle(true);
-                    }}
-                    className="text-xs px-3 py-1 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 rounded-lg transition"
-                  >
-                    Configure In-Card
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {isCustomCycleActive && !isEditingCustomCycle && (
-              <div className="mt-4 pt-2 border-t border-slate-800/20 flex gap-2">
-                <button
-                  onClick={() => {
-                    setStartDateFilter(customCycleStart);
-                    setEndDateFilter(customCycleEnd);
-                    setMonthFilter("All");
-                    setYearFilter("All");
-                    showNotification("Applied custom cycle date filter to spreadsheet!", "success");
-                  }}
-                  className={`flex-1 py-1 px-2.5 rounded-lg text-[10px] font-bold text-center border cursor-pointer transition ${
-                    startDateFilter === customCycleStart && endDateFilter === customCycleEnd
-                      ? "bg-emerald-500 text-slate-950 border-emerald-500"
-                      : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20"
-                  }`}
-                >
-                  Apply Cycle Filter
-                </button>
-                {(startDateFilter !== "" || endDateFilter !== "") && (
-                  <button
-                    onClick={() => {
-                      setStartDateFilter("");
-                      setEndDateFilter("");
-                      showNotification("Cleared date range filters", "info");
-                    }}
-                    className="py-1 px-2 border border-slate-700/60 hover:bg-slate-800/40 text-slate-400 hover:text-slate-200 rounded-lg text-[10px] font-bold cursor-pointer transition"
-                    title="Clear filters"
-                  >
-                    Clear Filter
-                  </button>
-                )}
-              </div>
-            )}
-          </motion.div>
-
-          {/* Card 3: Custom Date Comparison Selector & Scorecard */}
-          <motion.div variants={cardVariants} className={`col-span-12 md:col-span-4 transition-all duration-300 p-5 rounded-2xl border flex flex-col justify-between ${
-            darkMode ? "bg-slate-900/60 border-slate-800 text-slate-100" : "bg-white border-slate-200 text-slate-800 shadow-sm"
-          }`}>
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <h3 className={`font-bold text-sm ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>Period Comparison</h3>
-                  <p className="text-[11px] text-slate-400">Compare any custom ranges side-by-side</p>
-                </div>
-                <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg">
-                  <Filter className="w-4 h-4" />
-                </div>
-              </div>
-
-              {/* Range Selectors */}
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                <div>
-                  <label className="block text-[8px] uppercase tracking-wider font-bold text-slate-500 mb-0.5">Range A (Base)</label>
-                  <div className="space-y-1">
-                    <input 
-                      type="date" 
-                      value={compStartA}
-                      onChange={(e) => setCompStartA(e.target.value)}
-                      className={`w-full border rounded-lg p-1 text-[9px] focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"
-                      }`}
-                    />
-                    <input 
-                      type="date" 
-                      value={compEndA}
-                      onChange={(e) => setCompEndA(e.target.value)}
-                      className={`w-full border rounded-lg p-1 text-[9px] focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"
-                      }`}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[8px] uppercase tracking-wider font-bold text-slate-500 mb-0.5">Range B (Compare)</label>
-                  <div className="space-y-1">
-                    <input 
-                      type="date" 
-                      value={compStartB}
-                      onChange={(e) => setCompStartB(e.target.value)}
-                      className={`w-full border rounded-lg p-1 text-[9px] focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"
-                      }`}
-                    />
-                    <input 
-                      type="date" 
-                      value={compEndB}
-                      onChange={(e) => setCompEndB(e.target.value)}
-                      className={`w-full border rounded-lg p-1 text-[9px] focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"
-                      }`}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Side-by-Side Statistics */}
-              <div className="space-y-1.5 mt-3 pt-2.5 border-t border-slate-800/10">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-400">Total Spent</span>
-                  <div className="flex items-center gap-2 font-mono">
-                    <span className="text-slate-500 text-[10px]">{currencySymbol}{compStatsA.total.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                    <span className="text-slate-400 font-semibold">&rarr;</span>
-                    <span className={`font-bold ${darkMode ? "text-slate-200" : "text-slate-800"}`}>{currencySymbol}{compStatsB.total.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                    <span className={`text-[10px] font-bold px-1 py-0.5 rounded ${
-                      compTotalDiff <= 0 
-                        ? "bg-emerald-500/10 text-emerald-400" 
-                        : "bg-rose-500/10 text-rose-400"
-                    }`}>
-                      {compTotalDiff >= 0 ? "+" : ""}{compTotalDiff.toFixed(0)}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-slate-400">Transactions</span>
-                  <div className="flex items-center gap-2 font-mono">
-                    <span className="text-slate-500 text-[10px]">{compStatsA.count}</span>
-                    <span className="text-slate-400 font-semibold">&rarr;</span>
-                    <span className={`font-bold ${darkMode ? "text-slate-200" : "text-slate-800"}`}>{compStatsB.count}</span>
-                    <span className={`text-[10px] font-semibold px-1 py-0.5 rounded ${
-                      darkMode ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-700"
-                    }`}>
-                      {compCountDiff >= 0 ? "+" : ""}{compCountDiff.toFixed(0)}%
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-2.5 text-[9px] text-slate-500 italic text-right">
-              Comparison dates automatically update statistics.
-            </div>
-          </motion.div>
-
-        </div>
-
-        {/* ROW 2: SPENDING TREND AREA CHART (8 columns) & ACTIVE MONTHLY BUDGET BLOCK (4 columns) */}
-        {/* Main Line / Area Trend Chart */}
-        <motion.div variants={cardVariants} className={`col-span-12 lg:col-span-8 flex flex-col justify-between transition-all duration-300 ${
-          darkMode ? "bento-card-dark" : "bento-card-light"
-        }`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-2 border-b border-slate-800/10">
-            <div>
-              <h3 className={`font-bold text-base ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>
-                {trendViewMode === "chart" ? "Expense Spending Trend" : "Interactive Calendar View"}
-              </h3>
-              <p className="text-xs text-slate-400">
-                {trendViewMode === "chart" 
-                  ? "Interactive visual timeline of transactions" 
-                  : "Click any date to see exact expenses and track daily spending density"
-                }
-              </p>
-            </div>
-
-            {/* Toggle Switch */}
-            <div className={`flex items-center p-0.5 rounded-xl border ${
-              darkMode ? "bg-slate-950/60 border-slate-800" : "bg-slate-100 border-slate-200"
-            }`}>
-              <button
-                id="toggle-trend-chart-view"
-                type="button"
-                onClick={() => setTrendViewMode("chart")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                  trendViewMode === "chart"
-                    ? "bg-emerald-500 text-slate-950 shadow-md"
-                    : darkMode 
-                      ? "text-slate-400 hover:text-slate-200" 
-                      : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <TrendingUp className="w-3.5 h-3.5" />
-                <span>Timeline Chart</span>
-              </button>
-              <button
-                id="toggle-trend-calendar-view"
-                type="button"
-                onClick={() => setTrendViewMode("calendar")}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                  trendViewMode === "calendar"
-                    ? "bg-emerald-500 text-slate-950 shadow-md"
-                    : darkMode 
-                      ? "text-slate-400 hover:text-slate-200" 
-                      : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                <span>Calendar Grid</span>
-              </button>
-            </div>
-          </div>
-
-          {trendViewMode === "chart" ? (
-            <div className="h-52 sm:h-64 md:h-72 w-full mt-auto">
-              {trendChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                  <AreaChart 
-                    data={trendChartData}
-                    margin={{
-                      top: 5,
-                      right: isMobile ? 10 : 20,
-                      left: isMobile ? -15 : 0,
-                      bottom: 0
-                    }}
-                  >
-                    <defs>
-                      <linearGradient id="colorSpent" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.15} />
-                    <XAxis 
-                      dataKey="date" 
-                      stroke="#64748b" 
-                      fontSize={windowWidth < 480 ? 8.5 : (isMobile ? 9 : 11)}
-                      tickLine={false} 
-                      minTickGap={windowWidth < 360 ? 70 : (windowWidth < 480 ? 55 : (isMobile ? 35 : 15))}
-                    />
-                    <YAxis 
-                      stroke="#64748b" 
-                      fontSize={isMobile ? 9 : 11}
-                      tickLine={false} 
-                      axisLine={false}
-                      tickFormatter={(v) => `${currencySymbol}${v}`}
-                    />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: darkMode ? "#1e293b" : "#ffffff", 
-                        border: `1px solid ${darkMode ? "#334155" : "#e2e8f0"}`,
-                        borderRadius: "12px",
-                        color: darkMode ? "#f8fafc" : "#0f172a" 
-                      }} 
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="amount" 
-                      stroke="#10b981" 
-                      strokeWidth={2}
-                      fillOpacity={1} 
-                      fill="url(#colorSpent)" 
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center text-slate-500 text-xs italic">
-                  No historical data to display. Please log transaction records.
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-12 gap-4 w-full mt-2">
-              {/* Calendar Grid Column */}
-              <div className="col-span-12 md:col-span-7 lg:col-span-8 space-y-3">
-                {/* Calendar Month & Year Selector Header */}
-                <div className="flex items-center justify-between p-1 bg-slate-950/20 rounded-xl border border-slate-800/10">
-                  <button
-                    id="calendar-prev-month-btn"
-                    type="button"
-                    onClick={() => {
-                      if (calendarMonth === 0) {
-                        setCalendarMonth(11);
-                        setCalendarYear(prev => prev - 1);
-                      } else {
-                        setCalendarMonth(prev => prev - 1);
-                      }
-                    }}
-                    className={`p-1 rounded-lg border transition cursor-pointer ${
-                      darkMode 
-                        ? "bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300" 
-                        : "bg-white hover:bg-slate-50 border-slate-200 text-slate-700"
-                    }`}
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                  </button>
-
-                  <span className={`text-xs font-extrabold tracking-wide uppercase ${darkMode ? "text-slate-200" : "text-slate-850"}`}>
-                    {MONTH_NAMES[calendarMonth]} {calendarYear}
-                  </span>
-
-                  <button
-                    id="calendar-next-month-btn"
-                    type="button"
-                    onClick={() => {
-                      if (calendarMonth === 11) {
-                        setCalendarMonth(0);
-                        setCalendarYear(prev => prev + 1);
-                      } else {
-                        setCalendarMonth(prev => prev + 1);
-                      }
-                    }}
-                    className={`p-1 rounded-lg border transition cursor-pointer ${
-                      darkMode 
-                        ? "bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300" 
-                        : "bg-white hover:bg-slate-50 border-slate-200 text-slate-700"
-                    }`}
-                  >
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Days of week header */}
-                <div className="grid grid-cols-7 gap-1 text-center font-bold text-[9px] uppercase tracking-wider text-slate-500">
-                  {WEEK_DAYS.map(day => (
-                    <div key={day} className="py-0.5">{day}</div>
-                  ))}
-                </div>
-
-                {/* Calendar Days cells */}
-                <div className="grid grid-cols-7 gap-1">
-                  {getCalendarCells().map((cell, idx) => {
-                    const cellExpenses = expensesByDate[cell.dateStr] || [];
-                    const cellTotal = cellExpenses.reduce((sum, e) => sum + e.amount, 0);
-                    const isSelected = selectedCalendarDate === cell.dateStr;
-                    
-                    // Highlight style based on spend density
-                    let densityBg = "";
-                    if (cellTotal > 0) {
-                      if (cellTotal > activeBudget * 0.1) {
-                        densityBg = darkMode ? "bg-rose-500/15 text-rose-400 border-rose-500/30" : "bg-rose-100 text-rose-800 border-rose-200";
-                      } else if (cellTotal > activeBudget * 0.03) {
-                        densityBg = darkMode ? "bg-amber-500/15 text-amber-400 border-amber-500/30" : "bg-amber-100 text-amber-850 border-amber-200";
-                      } else {
-                        densityBg = darkMode ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" : "bg-emerald-100 text-emerald-800 border-emerald-200";
-                      }
-                    } else {
-                      densityBg = cell.isCurrentMonth
-                        ? darkMode ? "bg-slate-900/40 text-slate-400 border-slate-850" : "bg-slate-50/50 text-slate-500 border-slate-100"
-                        : darkMode ? "bg-slate-950/20 text-slate-600 border-transparent opacity-40" : "bg-slate-100/30 text-slate-400 border-transparent opacity-40";
-                    }
-
-                    return (
-                      <button
-                        id={`calendar-cell-${cell.dateStr}`}
-                        key={`${cell.dateStr}-${idx}`}
-                        type="button"
-                        onClick={() => setSelectedCalendarDate(cell.dateStr)}
-                        className={`relative aspect-square flex flex-col items-center justify-between p-1 rounded-lg border text-center transition cursor-pointer ${densityBg} ${
-                          isSelected 
-                            ? "ring-2 ring-emerald-500 border-emerald-500 scale-102 z-10" 
-                            : "hover:scale-101 hover:border-slate-500"
+                      <path
+                        className={`transition-all duration-700 ${
+                          isOverBudget 
+                            ? "text-rose-500 drop-shadow-[0_0_12px_rgba(244,63,94,0.6)]" 
+                            : displayProgress > 80 
+                            ? "text-amber-400 drop-shadow-[0_0_12px_rgba(251,191,36,0.6)]" 
+                            : "text-[#10b981] drop-shadow-[0_0_14px_rgba(16,185,129,0.6)]"
                         }`}
-                      >
-                        {/* Day number */}
-                        <span className="text-[10px] font-bold self-start pl-0.5">{cell.day}</span>
-                        
-                        {/* Optional total spending label */}
-                        {cellTotal > 0 && (
-                          <span className="text-[8px] font-extrabold font-mono truncate max-w-full leading-none mb-0.5">
-                            {currencySymbol}{cellTotal.toFixed(0)}
-                          </span>
-                        )}
-
-                        {/* Spend Dot Indicator */}
-                        {cellTotal > 0 && (
-                          <span className={`w-1 h-1 rounded-full ${
-                            cellTotal > activeBudget * 0.1 ? "bg-rose-500" : cellTotal > activeBudget * 0.03 ? "bg-amber-500" : "bg-emerald-500"
-                          }`} />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Density Legend */}
-                <div className="flex flex-wrap items-center gap-3 pt-1 text-[9px] text-slate-400 font-medium">
-                  <span>Legend:</span>
-                  <div className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded bg-emerald-500/10 border border-emerald-500/20" />
-                    <span>Low Spend</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded bg-amber-500/10 border border-amber-500/20" />
-                    <span>Medium Spend</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded bg-rose-500/10 border border-rose-500/20" />
-                    <span>High Spend (&gt;10% budget)</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Selected Day Inspector Panel Column */}
-              <div className={`col-span-12 md:col-span-5 lg:col-span-4 p-3 rounded-xl border flex flex-col justify-between ${
-                darkMode ? "bg-slate-950/40 border-slate-800" : "bg-slate-50 border-slate-200"
-              }`}>
-                {(() => {
-                  const dayExpList = expensesByDate[selectedCalendarDate] || [];
-                  const dayTotalAmt = dayExpList.reduce((sum, e) => sum + e.amount, 0);
-                  
-                  const formattedDate = (() => {
-                    try {
-                      const [y, m, d] = selectedCalendarDate.split("-");
-                      const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
-                      return dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-                    } catch (e) {
-                      return selectedCalendarDate;
-                    }
-                  })();
-
-                  return (
-                    <div className="flex flex-col h-full justify-between space-y-3">
-                      <div>
-                        {/* Date Header */}
-                        <div className="flex items-center justify-between border-b border-slate-800/20 pb-1.5 mb-2">
-                          <div>
-                            <h4 className={`text-xs font-extrabold ${darkMode ? "text-slate-200" : "text-slate-850"}`}>
-                              {formattedDate}
-                            </h4>
-                            <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Day Breakdown</p>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-[9px] text-slate-500 block">Total Spent</span>
-                            <span className={`text-xs font-mono font-extrabold ${dayTotalAmt > 0 ? "text-emerald-400" : "text-slate-400"}`}>
-                              {currencySymbol}{dayTotalAmt.toLocaleString(undefined, { minimumFractionDigits: 0 })}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Expenses List */}
-                        <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
-                          {dayExpList.length > 0 ? (
-                            dayExpList.map((exp) => (
-                              <div 
-                                key={exp.id || exp.createdAt?.toString()} 
-                                className={`p-2 rounded-lg border flex items-center justify-between text-[11px] transition ${
-                                  darkMode 
-                                    ? "bg-slate-900/50 border-slate-850 hover:bg-slate-900" 
-                                    : "bg-white border-slate-100 hover:bg-slate-50"
-                                }`}
-                              >
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                    exp.paymentMode === "UPI" ? "bg-indigo-500" : "bg-emerald-500"
-                                  }`} />
-                                  <div className="truncate">
-                                    <div className={`font-bold truncate ${darkMode ? "text-slate-200" : "text-slate-850"}`}>
-                                      {exp.description}
-                                    </div>
-                                    <div className="text-[8px] text-slate-500 flex items-center gap-1 font-semibold">
-                                      <span className="uppercase tracking-wider">{exp.category}</span>
-                                      <span>•</span>
-                                      <span>{exp.paymentMode}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="text-right shrink-0 pl-1.5">
-                                  <div className={`font-mono font-bold ${darkMode ? "text-slate-200" : "text-slate-850"}`}>
-                                    {currencySymbol}{exp.amount.toFixed(0)}
-                                  </div>
-                                  <div className="flex gap-1 justify-end mt-0.5">
-                                    <button
-                                      id={`calendar-edit-btn-${exp.id}`}
-                                      type="button"
-                                      onClick={() => {
-                                        setExpenseToEdit(exp);
-                                        setIsModalOpen(true);
-                                      }}
-                                      className="text-[8px] text-slate-500 hover:text-emerald-400 font-bold"
-                                    >
-                                      Edit
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="py-6 text-center text-slate-500 italic text-[10px] flex flex-col items-center justify-center gap-1">
-                              <Info className="w-4 h-4 text-slate-600" />
-                              <span>No expenses logged.</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Quick Day Action Buttons */}
-                      <div className="pt-2 border-t border-slate-800/10 flex flex-col gap-1.5 mt-auto">
-                        <button
-                          id="calendar-add-expense-for-date"
-                          type="button"
-                          onClick={() => {
-                            setExpenseToEdit(null);
-                            setIsModalOpen(true);
-                          }}
-                          className="w-full py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-[10px] rounded-lg transition duration-150 flex items-center justify-center gap-1 cursor-pointer"
-                        >
-                          <Plus className="w-3 h-3" />
-                          <span>Add Expense</span>
-                        </button>
-                        
-                        <button
-                          id="calendar-filter-table-to-date"
-                          type="button"
-                          onClick={() => {
-                            setStartDateFilter(selectedCalendarDate);
-                            setEndDateFilter(selectedCalendarDate);
-                            showNotification(`Filtered transaction records by date: ${formattedDate}`, "success");
-                            
-                            const element = document.getElementById("search-filter-controls-header");
-                            if (element) {
-                              element.scrollIntoView({ behavior: "smooth" });
-                            }
-                          }}
-                          className={`w-full py-1.5 border font-bold text-[10px] rounded-lg transition duration-150 flex items-center justify-center gap-1 cursor-pointer ${
-                            darkMode 
-                              ? "bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300" 
-                              : "bg-white hover:bg-slate-50 border-slate-200 text-slate-700"
-                          }`}
-                        >
-                          <Filter className="w-3 h-3" />
-                          <span>Filter Table</span>
-                        </button>
-                      </div>
+                        strokeWidth="3.4"
+                        strokeDasharray={`${Math.min(100, displayProgress)}, 100`}
+                        strokeLinecap="round"
+                        stroke="currentColor"
+                        fill="none"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                    </svg>
+                    
+                    <div className="absolute flex flex-col items-center select-none text-center">
+                      <span className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-white tabular-nums">
+                        {displayProgress.toFixed(0)}%
+                      </span>
+                      <span className="text-[10px] sm:text-[11px] font-mono uppercase tracking-widest text-slate-400 font-semibold mt-0.5">
+                        {isOverBudget ? "Exceeded" : "USED"}
+                      </span>
                     </div>
-                  );
-                })()}
-              </div>
-            </div>
-          )}
-        </motion.div>
-
-        {/* BUDGET MODULE BLOCK */}
-        <motion.div variants={cardVariants} className={`col-span-12 lg:col-span-4 flex flex-col justify-between transition-all duration-300 ${
-          darkMode ? "bento-card-dark" : "bento-card-light"
-        }`}>
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <h3 className={`font-bold text-base ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>
-                {isCustomCycleActive ? "Active Cycle Budget" : "Active Monthly Budget"}
-              </h3>
-              <p className="text-xs text-slate-400">
-                {isCustomCycleActive 
-                  ? `${new Date(customCycleStart).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} - ${new Date(customCycleEnd).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
-                  : "Smart budgeting limit check"}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                const currentLimit = isCustomCycleActive ? customCycleBudget : activeBudget;
-                setActiveBudgetLimitInput(currentLimit.toString());
-                setActiveBudgetStartInput(profile?.customPeriodStartDate || "2026-06-23");
-                setActiveBudgetEndInput(profile?.customPeriodEndDate || "2026-07-23");
-                setActiveBudgetUseCustomInput(isCustomCycleActive);
-                setIsEditingActiveBudgetBlock(!isEditingActiveBudgetBlock);
-              }}
-              className={`p-2 rounded-xl transition-all cursor-pointer border ${
-                isEditingActiveBudgetBlock
-                  ? "bg-rose-500/10 text-rose-400 border-rose-500/30"
-                  : "bg-slate-500/10 text-slate-400 hover:text-slate-200 border-transparent hover:bg-slate-500/20"
-              }`}
-              title="Edit Budget and Cycle"
-            >
-              {isEditingActiveBudgetBlock ? <X className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
-            </button>
-          </div>
-
-          {isEditingActiveBudgetBlock ? (
-            <div className="space-y-4 my-auto py-2">
-              <div className="space-y-1">
-                <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                  Budget Limit ({currencySymbol})
-                </label>
-                <input
-                  type="number"
-                  value={activeBudgetLimitInput}
-                  onChange={(e) => setActiveBudgetLimitInput(e.target.value)}
-                  placeholder="e.g. 15000"
-                  className={`w-full border rounded-xl p-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
-                    darkMode ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"
-                  }`}
-                />
-              </div>
-
-              <div className="space-y-1.5 border-t border-slate-800/15 pt-3">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={activeBudgetUseCustomInput}
-                    onChange={(e) => setActiveBudgetUseCustomInput(e.target.checked)}
-                    className="rounded text-blue-500 bg-slate-950 border-slate-800 focus:ring-blue-500/20 w-4 h-4 cursor-pointer"
-                  />
-                  <span className="text-[11px] text-slate-300 font-bold">Use Custom Start & End Dates</span>
-                </label>
-                <p className="text-[10px] text-slate-500 leading-normal">
-                  Enable custom billing period cycle rather than default full calendar months.
-                </p>
-              </div>
-
-              {activeBudgetUseCustomInput && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
-                      Cycle Start
-                    </label>
-                    <input
-                      type="date"
-                      value={activeBudgetStartInput}
-                      onChange={(e) => setActiveBudgetStartInput(e.target.value)}
-                      className={`w-full border rounded-xl p-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
-                        darkMode ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"
-                      }`}
-                    />
                   </div>
-                  <div>
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
-                      Cycle End
-                    </label>
-                    <input
-                      type="date"
-                      value={activeBudgetEndInput}
-                      onChange={(e) => setActiveBudgetEndInput(e.target.value)}
-                      className={`w-full border rounded-xl p-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 ${
-                        darkMode ? "bg-slate-950/60 border-slate-800 text-slate-300" : "bg-white border-slate-200 text-slate-700"
-                      }`}
-                    />
+
+                  {/* Daily safe allowance pill & Gemini Forecast shortcut */}
+                  <div className="mt-3 flex flex-col items-center gap-1.5">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/[0.04] border border-white/[0.08] text-[11px] font-mono">
+                      <span className="text-slate-400">Safe pace:</span>
+                      <span className="text-emerald-400 font-bold tabular-nums">
+                        {currencySymbol}{safeDailySpend.toFixed(0)} / day
+                      </span>
+                      <span className="text-slate-500">({activeDaysRemaining}d left)</span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-center gap-1.5 mt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("analytics")}
+                        className="text-[11px] font-mono text-cyan-300 hover:text-cyan-200 flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/25 transition cursor-pointer"
+                        title="View AI spending projection and future trends"
+                      >
+                        <Sparkles className="w-3 h-3 text-cyan-400" />
+                        <span>AI Spending Forecast →</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsReceiptScannerOpen(true)}
+                        className="text-[11px] font-mono text-emerald-300 hover:text-emerald-200 flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 transition cursor-pointer"
+                        title="Scan bill or receipt using Gemini OCR"
+                      >
+                        <ScanLine className="w-3 h-3 text-emerald-400" />
+                        <span>Scan Bill (OCR) 📷</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
 
-              <div className="pt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleSaveActiveBudgetInline(activeBudgetLimitInput, activeBudgetUseCustomInput, activeBudgetStartInput, activeBudgetEndInput)}
-                  className="flex-1 py-2 px-3 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold transition shadow-md cursor-pointer"
-                >
-                  Save Settings
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsEditingActiveBudgetBlock(false)}
-                  className={`py-2 px-3 border rounded-xl text-xs font-bold transition cursor-pointer ${
-                    darkMode 
-                      ? "border-slate-800 hover:bg-slate-800 text-slate-400 hover:text-slate-200" 
-                      : "border-slate-200 hover:bg-slate-50 text-slate-600 hover:text-slate-800"
-                  }`}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* Gorgeous Circular Progress Indicator */}
-              <div className="flex flex-col items-center justify-center py-4 my-auto">
-                <div className="relative w-36 h-36 flex items-center justify-center">
-                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                    <path
-                      className={`${darkMode ? "text-slate-800/80" : "text-slate-200"}`}
-                      strokeWidth="3.2"
-                      stroke="currentColor"
-                      fill="none"
-                      strokeDasharray="100, 100"
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                    />
-                    <path
-                      className={`${
-                        (isCustomCycleActive ? customCycleSpent : totalSpentCurrentMonth) > (isCustomCycleActive ? customCycleBudget : activeBudget) 
-                          ? "text-rose-500" 
-                          : (isCustomCycleActive ? customCycleProgress : (totalSpentCurrentMonth / activeBudget) * 100) > 85
-                          ? "text-amber-500"
-                          : "text-emerald-500"
-                      }`}
-                      strokeWidth="3.2"
-                      strokeDasharray={`${Math.min(100, (isCustomCycleActive ? customCycleBudget : activeBudget) > 0 ? (isCustomCycleActive ? customCycleProgress : (totalSpentCurrentMonth / activeBudget) * 100) : 0)}, 100`}
-                      strokeLinecap="round"
-                      stroke="currentColor"
-                      fill="none"
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                    />
-                  </svg>
-                  <div className="absolute flex flex-col items-center">
-                    <span className={`text-2xl font-extrabold ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>
-                      {(isCustomCycleActive ? customCycleProgress : (totalSpentCurrentMonth / activeBudget) * 100).toFixed(0)}%
-                    </span>
-                    <span className="text-[9px] uppercase text-slate-500 font-bold tracking-wider">Used</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Budget status metrics */}
-              <div className="space-y-2.5">
-                <div className="flex justify-between items-center text-xs border-b border-slate-800/30 pb-2">
-                  <span className="text-slate-400">Limit</span>
-                  <span className={`font-bold ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>
-                    {currencySymbol}{(isCustomCycleActive ? customCycleBudget : activeBudget).toLocaleString()}
+              {/* Footer Metrics Row (User Screenshot Spec) */}
+              <div className="space-y-2.5 pt-3.5 border-t border-white/[0.08] text-xs sm:text-sm">
+                <div className="flex justify-between items-center text-slate-400">
+                  <span className="font-normal text-slate-400">Limit</span>
+                  <span className="font-mono font-bold text-white tabular-nums text-sm sm:text-base">
+                    {currencySymbol}{displayLimit.toLocaleString()}
                   </span>
                 </div>
-                <div className="flex justify-between items-center text-xs border-b border-slate-800/30 pb-2">
-                  <span className="text-slate-400">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 font-normal">
                     {isCustomCycleActive ? "Spent (Cycle)" : "Spent (Month)"}
                   </span>
-                  <span className="font-bold text-emerald-400">
-                    {currencySymbol}{(isCustomCycleActive ? customCycleSpent : totalSpentCurrentMonth).toLocaleString()}
+                  <span className={`font-mono font-bold tabular-nums text-sm sm:text-base ${isOverBudget ? "text-rose-400" : "text-[#10b981]"}`}>
+                    {currencySymbol}{displaySpent.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
-                <div className="flex justify-between items-center text-xs pb-1">
-                  <span className="text-slate-400">Remaining</span>
-                  <span className={`font-bold ${(isCustomCycleActive ? customCycleRemaining : remainingBudget) === 0 ? "text-rose-400 animate-pulse" : "text-emerald-400"}`}>
-                    {currencySymbol}{(isCustomCycleActive ? customCycleRemaining : remainingBudget).toLocaleString()}
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400 font-normal">Remaining</span>
+                  <span className={`font-mono font-bold tabular-nums text-sm sm:text-base ${isOverBudget ? "text-rose-400" : "text-[#10b981]"}`}>
+                    {currencySymbol}{displayRemaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
-
-                {isCustomCycleActive && (
-                  <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1 font-semibold border-t border-slate-800/20">
-                    <span>Days Remaining:</span>
-                    <span className="text-blue-400">
-                      {customCycleDaysLeft > 0 ? `${customCycleDaysLeft} days` : "Ended / Last Day"}
-                    </span>
-                  </div>
-                )}
-
-                {(isCustomCycleActive ? customCycleSpent : totalSpentCurrentMonth) > (isCustomCycleActive ? customCycleBudget : activeBudget) && (
-                  <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-[10px] flex items-center gap-1.5 mt-2">
-                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 animate-bounce" />
-                    <span>Over budget by {currencySymbol}{((isCustomCycleActive ? customCycleSpent : totalSpentCurrentMonth) - (isCustomCycleActive ? customCycleBudget : activeBudget)).toFixed(2)}</span>
-                  </div>
-                )}
               </div>
-            </>
-          )}
-        </motion.div>
+            </div>
 
-        {/* ROW 3: CATEGORY PIE CHART (4 columns), MONTHLY BAR CHART (4 columns), DATA ACTIONS (4 columns) */}
-        {/* Category distribution (Pie Chart) */}
-        <motion.div variants={cardVariants} className={`col-span-12 lg:col-span-4 flex flex-col justify-between transition-all duration-300 ${
-          darkMode ? "bento-card-dark" : "bento-card-light"
-        }`}>
-          <div>
-            <h3 className={`font-bold text-base ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>Category distribution</h3>
-            <p className="text-xs text-slate-400">Percentage allocation of total spending</p>
-          </div>
-
-          <div className="h-48 w-full relative my-auto">
-            {categoryChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                <PieChart>
-                  <Pie
-                    data={categoryChartData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={75}
-                    paddingAngle={4}
-                    dataKey="value"
-                  >
-                    {categoryChartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: darkMode ? "#1e293b" : "#ffffff", 
-                      border: `1px solid ${darkMode ? "#334155" : "#e2e8f0"}`,
-                      borderRadius: "12px"
-                    }}
-                    itemStyle={{ color: darkMode ? "#f8fafc" : "#0f172a" }}
-                    formatter={(value: any) => [`${currencySymbol}${parseFloat(value).toFixed(2)}`, "Spent"]}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-slate-500 text-xs italic">
-                No categories logged.
-              </div>
-            )}
-          </div>
-
-          {/* Custom Interactive Legend with Percentage indicators */}
-          <div className="overflow-y-auto max-h-[140px] pr-1 space-y-2 mt-2">
-            {categoryChartData.map((entry, index) => {
-              const percentage = totalSpentFiltered > 0 ? ((entry.value / totalSpentFiltered) * 100).toFixed(0) : "0";
-              return (
-                <div key={entry.name} className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <span 
-                      className="w-2.5 h-2.5 rounded-full shrink-0" 
-                      style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                    />
-                    <span className={`font-medium truncate max-w-[120px] ${darkMode ? "text-slate-300" : "text-slate-700"}`}>{entry.name}</span>
-                  </div>
-                  <div className="flex items-center gap-2 font-mono">
-                    <span className="text-slate-400">{currencySymbol}{entry.value.toFixed(0)}</span>
-                    <span className="text-emerald-400 font-bold">{percentage}%</span>
+            {/* CARD 2: REAL-TIME BURN RATE & SPENDING ARCHIVES */}
+            <div className="col-span-12 lg:col-span-7 grid grid-cols-12 gap-5">
+              
+              {/* Stat 1: Total Spent Filtered */}
+              <div className={`col-span-12 sm:col-span-6 ${darkMode ? "bento-card-dark" : "bento-card-light"} relative`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    Total Ledger Spent
+                  </span>
+                  <div className="p-2 rounded-xl bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-500/10">
+                    <TrendingUp className="w-4 h-4" />
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </motion.div>
-
-        {/* Monthly Comparison Bar Chart */}
-        <motion.div variants={cardVariants} className={`col-span-12 lg:col-span-4 relative flex flex-col justify-between transition-all duration-300 ${
-          darkMode ? "bento-card-dark" : "bento-card-light"
-        }`}>
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <CalendarDays className="w-5 h-5 text-blue-500 animate-pulse-subtle shrink-0" />
-              <h3 className={`font-bold text-base ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>Monthly Comparison</h3>
-            </div>
-            <p className="text-xs text-slate-400">Click a month bar or button below to inspect details</p>
-          </div>
-
-          <div className="h-44 sm:h-48 md:h-52 w-full my-auto mt-4">
-            {monthlyBarData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                <BarChart 
-                  data={monthlyBarData}
-                  margin={{
-                    top: 5,
-                    right: isMobile ? 10 : 20,
-                    left: isMobile ? -15 : 0,
-                    bottom: 0
-                  }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.15} />
-                  <XAxis 
-                    dataKey="month" 
-                    stroke="#64748b" 
-                    fontSize={isMobile ? 9 : 11} 
-                    tickLine={false} 
-                  />
-                  <YAxis 
-                    stroke="#64748b" 
-                    fontSize={isMobile ? 9 : 11} 
-                    tickLine={false} 
-                    axisLine={false}
-                    tickFormatter={(v) => `${currencySymbol}${v}`}
-                  />
-                  <Tooltip 
-                    contentStyle={{ 
-                    backgroundColor: darkMode ? "#1e293b" : "#ffffff", 
-                    border: `1px solid ${darkMode ? "#334155" : "#e2e8f0"}`,
-                    borderRadius: "12px",
-                    color: darkMode ? "#f8fafc" : "#0f172a"
-                    }} 
-                  />
-                  <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]}>
-                    {monthlyBarData.map((entry, index) => (
-                      <Cell 
-                        key={`cell-${index}`} 
-                        fill={index === monthlyBarData.length - 1 ? "#10b981" : "#3b82f6"}
-                        onClick={() => setSelectedMonthDetails(entry.rawDate)}
-                        className="cursor-pointer hover:opacity-80 transition"
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-slate-500 text-xs italic">
-                No monthly spending logs.
+                <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-white tabular-nums">
+                  {currencySymbol}{totalSpentFiltered.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-xs text-slate-400 mt-2.5 flex items-center justify-between">
+                  <span>Volume: {filteredExpenses.length} records</span>
+                  <span className="font-mono text-emerald-400 font-semibold px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20">Active</span>
+                </div>
               </div>
-            )}
-          </div>
 
-          {/* Clickable Monthly Pills area */}
-          {monthlyBarData.length > 0 && (
-            <div className="mt-4 pt-3 border-t border-slate-800/10">
-              <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-2">
-                Inspect Month
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {monthlyBarData.map((item) => (
-                  <button
-                    key={item.rawDate}
-                    onClick={() => setSelectedMonthDetails(item.rawDate)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold transition cursor-pointer select-none ${
-                      selectedMonthDetails === item.rawDate
-                        ? "bg-blue-500/15 border-blue-500/30 text-blue-400"
-                        : darkMode
-                        ? "bg-slate-950/40 border-slate-800/80 hover:bg-slate-800/40 text-slate-300 hover:text-slate-100"
-                        : "bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700 hover:text-slate-900"
-                    }`}
-                  >
-                    <CalendarDays className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                    <span>{item.month}</span>
-                  </button>
-                ))}
+              {/* Stat 2: Today & Week Burn */}
+              <div className={`col-span-12 sm:col-span-6 ${darkMode ? "bento-card-dark" : "bento-card-light"} relative`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    Real-Time Velocity
+                  </span>
+                  <div className="p-2 rounded-xl bg-gradient-to-tr from-amber-500/20 to-orange-500/20 text-amber-400 border border-amber-500/30 shadow-sm shadow-amber-500/10">
+                    <Flame className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <div className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-amber-300 tabular-nums">
+                    {currencySymbol}{todaySpent.toLocaleString()}
+                  </div>
+                  <span className="text-xs text-slate-400 font-mono">today</span>
+                </div>
+                <div className="text-xs text-slate-400 mt-2.5 flex items-center justify-between font-mono">
+                  <span>Last 7 Days:</span>
+                  <span className="text-cyan-400 font-bold">{currencySymbol}{weeklySpent.toLocaleString()}</span>
+                </div>
               </div>
-            </div>
-          )}
 
-          {/* Monthly Inspector Drawer Overlay */}
-          <AnimatePresence>
-            {selectedMonthDetails && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 15 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 15 }}
-                className={`absolute inset-0 z-20 p-5 rounded-2xl flex flex-col justify-between ${
-                  darkMode 
-                    ? "bg-slate-900/98 backdrop-blur-md border border-slate-800 text-slate-100" 
-                    : "bg-white/98 backdrop-blur-md border border-slate-200 text-slate-800 shadow-xl"
-                }`}
-              >
-                {/* Header with Close */}
-                <div className="flex items-center justify-between pb-2 border-b border-slate-800/10">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-blue-500/10 text-blue-400 rounded-lg">
+              {/* Stat 3: MONTHLY SPEND ARCHIVES (THE FEATURE TO CLICK MONTH & SEE TOTAL SPENT + TOP TRANSACTION) */}
+              <div className={`col-span-12 ${darkMode ? "bento-card-dark" : "bento-card-light"}`}>
+                <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-white/[0.08]">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-1.5 rounded-lg bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
                       <CalendarDays className="w-4 h-4" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-sm">
-                        {(() => {
-                          const [y, m] = selectedMonthDetails.split("-");
-                          return new Date(parseInt(y), parseInt(m) - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
-                        })()}
-                      </h4>
-                      <p className="text-[10px] text-slate-400 font-medium">Monthly spending breakdown</p>
+                      <h4 className="text-sm font-bold text-white">Monthly Spend Archive</h4>
+                      <p className="text-[11px] text-slate-400">
+                        Click any month to inspect total spent and top transactions
+                      </p>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => setSelectedMonthDetails(null)}
-                    className="p-1 rounded-lg hover:bg-slate-800/30 text-slate-400 hover:text-slate-200 transition cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-indigo-400 font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 hidden sm:inline-block">
+                    Interactive
+                  </span>
                 </div>
 
-                {/* Content details */}
-                {(() => {
-                  const details = getMonthlyDetails(selectedMonthDetails);
+                {/* Monthly Pills Carousel */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                  {monthlyBarData.map((item) => (
+                    <button
+                      key={item.rawDate}
+                      type="button"
+                      onClick={() => setSelectedMonthDetails(item.rawDate)}
+                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer select-none group relative overflow-hidden ${
+                        selectedMonthDetails === item.rawDate
+                          ? "bg-gradient-to-br from-indigo-500/20 to-violet-500/15 border-indigo-500 text-white shadow-lg shadow-indigo-500/20"
+                          : "bg-white/[0.03] border-white/10 hover:border-indigo-500/40 text-slate-300 hover:text-white"
+                      }`}
+                    >
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block group-hover:text-indigo-300 transition">
+                        {item.month}
+                      </span>
+                      <span className="text-xs font-mono font-bold block mt-1 tabular-nums text-white">
+                        {currencySymbol}{item.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Selected Month Inspector Popover / Card */}
+                <AnimatePresence>
+                  {selectedMonthDetails && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      className="mt-4 p-4 rounded-2xl bg-slate-950/90 border border-indigo-500/35 shadow-2xl relative"
+                    >
+                      <button
+                        onClick={() => setSelectedMonthDetails(null)}
+                        className="absolute top-3 right-3 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+
+                      {(() => {
+                        const details = getMonthlyDetails(selectedMonthDetails);
+                        const [y, m] = selectedMonthDetails.split("-");
+                        const monthName = new Date(parseInt(y), parseInt(m) - 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+                        
+                        return (
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                              <h5 className="font-bold text-sm text-white font-sans">
+                                {monthName} Comprehensive Breakdown
+                              </h5>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {/* Left: Total Spent */}
+                              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                                <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Total Spent</span>
+                                <div className="text-xl font-mono font-bold text-emerald-400 mt-1 tabular-nums">
+                                  {currencySymbol}{details.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-mono mt-0.5 block">
+                                  {details.count} recorded transactions
+                                </span>
+                              </div>
+
+                              {/* Right: Top Transaction */}
+                              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                                <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Top Transaction</span>
+                                {details.topTx ? (
+                                  <div className="mt-1">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-xs font-semibold text-white truncate max-w-[140px]">
+                                        {details.topTx.description}
+                                      </span>
+                                      <span className="text-xs font-mono font-bold text-emerald-400 tabular-nums">
+                                        {currencySymbol}{details.topTx.amount.toLocaleString()}
+                                      </span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-400 font-mono flex items-center gap-2 mt-1">
+                                      {(() => {
+                                        const topCatStyle = getCategoryStyle(details.topTx.category);
+                                        return (
+                                          <span className={`inline-flex items-center gap-1 font-semibold px-1.5 py-0.5 rounded border ${topCatStyle.bg} ${topCatStyle.border} ${topCatStyle.text}`}>
+                                            <span className={`w-1 h-1 rounded-full ${topCatStyle.dot}`} />
+                                            {details.topTx.category}
+                                          </span>
+                                        );
+                                      })()}
+                                      <span>·</span>
+                                      <span>{details.topTx.date}</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-500 italic mt-1">No transactions recorded</p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1">
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                Data synced with Firestore database
+                              </span>
+                              <button
+                                onClick={() => {
+                                  const [yr, mo] = selectedMonthDetails.split("-");
+                                  setYearFilter(yr);
+                                  setMonthFilter(mo);
+                                  setActiveTab("transactions");
+                                  setSelectedMonthDetails(null);
+                                  showNotification(`Filtered ledger to ${monthName}`, "success");
+                                }}
+                                className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer transition"
+                              >
+                                <span>Filter ledger by this month</span>
+                                <ArrowRight className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+            </div>
+
+          </div>
+        )}
+
+        {/* =========================================================================
+            SECTION: SAVINGS GOALS & TARGETS (Command Center 'overview')
+           ========================================================================= */}
+        {activeTab === "overview" && (
+          <div className="space-y-6">
+            <SavingsGoalsCard
+              user={user}
+              currencySymbol={currencySymbol}
+              darkMode={darkMode}
+              onGoalCompleted={(goalName) => {
+                setThalaivarExpense({
+                  amount: 10000,
+                  category: "Savings Milestone",
+                  description: `Achieved: ${goalName}`
+                });
+                setIsThalaivarPopupOpen(true);
+                showNotification(`🎉 Congratulations! You achieved your savings goal: "${goalName}"!`, "success");
+              }}
+            />
+
+            {/* Gmail Automated AI Reports Hub Card */}
+            <GmailReportsCard
+              profile={profile}
+              expenses={expenses}
+              currencySymbol={currencySymbol}
+              monthlyBudget={displayLimit}
+              onOpenGmailModal={() => setIsGmailModalOpen(true)}
+              onTriggerQuickSend={handleTriggerQuickSend}
+              darkMode={darkMode}
+            />
+          </div>
+        )}
+
+        {/* =========================================================================
+            VIEW 1: DEEP ANALYTICS & TIMELINE (Active when 'analytics' or 'overview')
+           ========================================================================= */}
+        {activeTab === "analytics" && (
+          <div className="space-y-6">
+            
+            {/* Gemini Predictive Spending Trends & Forward Projections */}
+            <SpendingProjectionCard
+              currentMonth={monthFilter === "All" || !monthFilter ? currentMonthStr : `${yearFilter}-${monthFilter}`}
+              monthlyBudget={displayLimit}
+              currentMonthExpenses={currentMonthExpenses}
+              allExpenses={expenses}
+              currencySymbol={currencySymbol}
+              darkMode={darkMode}
+            />
+
+            <div className="grid grid-cols-12 gap-5">
+            
+            {/* Timeline Spending Area Chart */}
+            <div className={`col-span-12 lg:col-span-8 ${darkMode ? "bento-card-dark" : "bento-card-light"}`}>
+              <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/[0.08]">
+                <div>
+                  <h4 className="font-bold text-base text-white">Daily Spending Trajectory</h4>
+                  <p className="text-xs text-slate-400">Cumulative expenditure trajectory over time</p>
+                </div>
+                <div className="text-xs font-mono text-emerald-400 font-semibold px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                  {trendChartData.length} active data points
+                </div>
+              </div>
+
+              <div className="h-72 w-full">
+                {trendChartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                    <AreaChart data={trendChartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="glowArea" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
+                          <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? "#ffffff" : "#94a3b8"} opacity={darkMode ? 0.05 : 0.28} />
+                      <XAxis dataKey="date" stroke="#64748b" fontSize={11} tickLine={false} />
+                      <YAxis stroke="#64748b" fontSize={11} tickLine={false} tickFormatter={(v) => `${currencySymbol}${v}`} />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: darkMode ? "#080b11" : "#ffffff", 
+                          border: darkMode ? "1px solid rgba(255,255,255,0.15)" : "1px solid #cbd5e1",
+                          color: darkMode ? "#f8fafc" : "#0f172a",
+                          borderRadius: "14px",
+                          fontFamily: "JetBrains Mono"
+                        }} 
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="amount" 
+                        stroke="#10b981" 
+                        strokeWidth={2.5}
+                        fillOpacity={1} 
+                        fill="url(#glowArea)" 
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-500 text-xs italic font-mono">
+                    No transactions recorded to build trend chart.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Category Donut Distribution */}
+            <div className={`col-span-12 lg:col-span-4 ${darkMode ? "bento-card-dark" : "bento-card-light"} flex flex-col justify-between`}>
+              <div>
+                <h4 className="font-bold text-base text-white">Category Allocation</h4>
+                <p className="text-xs text-slate-400">Share of wallet across spending streams</p>
+              </div>
+
+              <div className="h-52 w-full my-auto relative">
+                {categoryChartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                    <PieChart>
+                      <Pie
+                        data={categoryChartData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={55}
+                        outerRadius={78}
+                        paddingAngle={3}
+                        dataKey="value"
+                      >
+                        {categoryChartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={getCategoryStyle(entry.name).hex} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: darkMode ? "#080d1a" : "#ffffff", 
+                          border: darkMode ? "1px solid rgba(255,255,255,0.15)" : "1px solid #cbd5e1",
+                          color: darkMode ? "#f8fafc" : "#0f172a",
+                          borderRadius: "14px",
+                          fontFamily: "JetBrains Mono"
+                        }}
+                        formatter={(val: any) => [`${currencySymbol}${Number(val).toFixed(2)}`, "Spent"]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-500 text-xs italic">
+                    No category data.
+                  </div>
+                )}
+              </div>
+
+              <div className="max-h-36 overflow-y-auto space-y-1.5 pt-2 border-t border-white/[0.08]">
+                {categoryChartData.map((item) => {
+                  const pct = totalSpentFiltered > 0 ? ((item.value / totalSpentFiltered) * 100).toFixed(0) : "0";
+                  const style = getCategoryStyle(item.name);
                   return (
-                    <div className="flex-1 my-3 flex flex-col justify-center space-y-3.5">
-                      {/* Total Spent */}
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-blue-500/5 border border-blue-500/10">
-                        <div className="flex items-center gap-2.5">
-                          <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
-                            <DollarSign className="w-4.5 h-4.5" />
-                          </div>
-                          <div>
-                            <p className="text-[10px] text-slate-400 font-medium">Total Spent</p>
-                            <p className="text-xl font-black text-blue-500">{currencySymbol}{details.total.toLocaleString()}</p>
-                          </div>
-                        </div>
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/15">
-                          {details.count} txs
+                    <div key={item.name} className="flex items-center justify-between text-xs py-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: style.hex }} />
+                        <span className="text-slate-200 font-medium truncate max-w-[120px]">{item.name}</span>
+                      </div>
+                      <div className="font-mono flex items-center gap-2">
+                        <span className="text-slate-400">{currencySymbol}{item.value.toFixed(0)}</span>
+                        <span className="text-emerald-400 font-bold">{pct}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+          </div>
+        </div>
+        )}
+
+        {/* =========================================================================
+            VIEW 2: CALENDAR MATRIX LEDGER (Active when 'calendar' or 'overview')
+           ========================================================================= */}
+        {(activeTab === "calendar" || (activeTab === "overview" && expenses.length > 0)) && (
+          <div className="grid grid-cols-12 gap-5">
+            
+            {/* 42-Cell Monthly Matrix Calendar */}
+            <div className={`col-span-12 lg:col-span-8 ${darkMode ? "bento-card-dark" : "bento-card-light"}`}>
+              {/* Header with Month Nav and Spending Color Legend */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-white/[0.08] gap-2.5">
+                <div>
+                  <h4 className="font-bold text-base text-white flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-emerald-400" />
+                    Interactive Calendar Ledger
+                  </h4>
+                  <p className="text-xs text-slate-400">Click any date to view itemized expenses and day totals</p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Heatmap Legend: Green = Low, Orange = Average, Red = Spends More */}
+                  <div className="flex items-center gap-2.5 px-2.5 py-1 rounded-xl bg-white/[0.03] border border-white/[0.07] text-[10px] font-mono">
+                    <span className="flex items-center gap-1.5 text-slate-300">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400" />
+                      <span>Low</span>
+                    </span>
+                    <span className="flex items-center gap-1.5 text-slate-300">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 shadow-sm shadow-amber-400" />
+                      <span>Average</span>
+                    </span>
+                    <span className="flex items-center gap-1.5 text-slate-300">
+                      <span className="w-2 h-2 rounded-full bg-rose-500 shadow-sm shadow-rose-500 animate-pulse" />
+                      <span>Spends More</span>
+                    </span>
+                  </div>
+
+                  {/* Month Nav Buttons */}
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => {
+                        if (calendarMonth === 0) {
+                          setCalendarMonth(11);
+                          setCalendarYear(prev => prev - 1);
+                        } else {
+                          setCalendarMonth(prev => prev - 1);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg border border-white/10 hover:bg-white/10 text-slate-300 transition cursor-pointer"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span className="text-xs font-mono font-bold uppercase tracking-wider text-white px-2">
+                      {MONTH_NAMES[calendarMonth]} {calendarYear}
+                    </span>
+                    <button
+                      onClick={() => {
+                        if (calendarMonth === 11) {
+                          setCalendarMonth(0);
+                          setCalendarYear(prev => prev + 1);
+                        } else {
+                          setCalendarMonth(prev => prev + 1);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg border border-white/10 hover:bg-white/10 text-slate-300 transition cursor-pointer"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Day headers */}
+              <div className="grid grid-cols-7 gap-1 text-center font-mono text-[11px] text-slate-500 font-bold uppercase mb-1">
+                {WEEK_DAYS.map((wd) => (
+                  <div key={wd} className="py-1">{wd}</div>
+                ))}
+              </div>
+
+              {/* Calendar Grid */}
+              <div className="grid grid-cols-7 gap-1.5">
+                {calendarCells.map((cell, idx) => {
+                  const dayExpenses = expensesByDate[cell.dateStr] || [];
+                  const dayTotal = dayExpenses.reduce((sum, e) => sum + e.amount, 0);
+                  const isSelected = selectedCalendarDate === cell.dateStr;
+                  const isToday = cell.dateStr === todayStr;
+                  const tier = getDaySpendingTier(dayTotal);
+
+                  // Colors:
+                  // High / Spends More -> Red (rose-400 / rose-500)
+                  // Average -> Orange / Amber (amber-400 / amber-500)
+                  // Low -> Green (emerald-400 / emerald-500)
+                  let cellStyle = darkMode
+                    ? "bg-transparent border-transparent text-slate-700 opacity-40"
+                    : "bg-transparent border-transparent text-slate-400 opacity-50";
+                  let amountColor = "text-emerald-400";
+
+                  if (isSelected) {
+                    if (tier === "high") {
+                      cellStyle = darkMode
+                        ? "bg-rose-500/25 border-rose-400 text-white shadow-lg shadow-rose-500/25 ring-2 ring-rose-400"
+                        : "bg-rose-100 border-rose-500 text-rose-950 shadow-md ring-2 ring-rose-500";
+                      amountColor = "text-rose-300 font-bold";
+                    } else if (tier === "average") {
+                      cellStyle = darkMode
+                        ? "bg-amber-500/25 border-amber-400 text-white shadow-lg shadow-amber-500/25 ring-2 ring-amber-400"
+                        : "bg-amber-100 border-amber-500 text-amber-950 shadow-md ring-2 ring-amber-500";
+                      amountColor = "text-amber-300 font-bold";
+                    } else if (tier === "low") {
+                      cellStyle = darkMode
+                        ? "bg-emerald-500/25 border-emerald-400 text-white shadow-lg shadow-emerald-500/25 ring-2 ring-emerald-400"
+                        : "bg-emerald-100 border-emerald-500 text-emerald-950 shadow-md ring-2 ring-emerald-500";
+                      amountColor = "text-emerald-300 font-bold";
+                    } else {
+                      cellStyle = darkMode
+                        ? "bg-white/10 border-white/40 text-white shadow-lg ring-2 ring-white/30"
+                        : "bg-slate-200 border-slate-500 text-slate-900 shadow-md ring-2 ring-slate-400";
+                      amountColor = "text-slate-300 font-bold";
+                    }
+                  } else if (tier === "high") {
+                    // Spends more -> Red
+                    cellStyle = darkMode
+                      ? "bg-rose-500/10 border-rose-500/35 hover:border-rose-500/60 text-slate-200 hover:shadow-sm hover:shadow-rose-500/20"
+                      : "bg-rose-50 border-rose-300 hover:border-rose-400 text-slate-900";
+                    amountColor = "text-rose-400 font-bold";
+                  } else if (tier === "average") {
+                    // Average -> Orange
+                    cellStyle = darkMode
+                      ? "bg-amber-500/10 border-amber-500/35 hover:border-amber-500/60 text-slate-200 hover:shadow-sm hover:shadow-amber-500/20"
+                      : "bg-amber-50 border-amber-300 hover:border-amber-400 text-slate-900";
+                    amountColor = "text-amber-400 font-bold";
+                  } else if (tier === "low") {
+                    // Low spendings -> Green
+                    cellStyle = darkMode
+                      ? "bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500/50 text-slate-200 hover:shadow-sm hover:shadow-emerald-500/20"
+                      : "bg-emerald-50 border-emerald-300 hover:border-emerald-400 text-slate-900";
+                    amountColor = "text-emerald-400 font-bold";
+                  } else if (cell.isCurrentMonth) {
+                    cellStyle = darkMode
+                      ? "bg-white/[0.02] border-white/[0.06] hover:bg-white/[0.05] text-slate-400"
+                      : "bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700";
+                  }
+
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setSelectedCalendarDate(cell.dateStr)}
+                      className={`min-h-[58px] p-1.5 rounded-xl border text-left flex flex-col justify-between transition cursor-pointer relative ${cellStyle}`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className={`text-[11px] font-mono font-semibold ${isToday ? "text-white font-bold" : ""}`}>
+                          {cell.day}
                         </span>
+                        {isToday && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400" />
+                        )}
                       </div>
 
-                      {/* Top Transaction */}
-                      <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Top Transaction</p>
-                        {details.topTx ? (
-                          <div className={`p-3 rounded-xl border ${darkMode ? "bg-slate-950/40 border-slate-800" : "bg-slate-50 border-slate-200"}`}>
-                            <div className="flex items-center justify-between mb-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/15">
-                                  {details.topTx.category}
-                                </span>
-                                <span className="text-[10px] text-slate-500">{details.topTx.date}</span>
-                              </div>
-                              <span className={`text-sm font-black ${darkMode ? "text-slate-100" : "text-slate-900"}`}>
-                                {currencySymbol}{details.topTx.amount.toLocaleString()}
+                      {dayTotal > 0 && (
+                        <div className={`mt-auto text-[10px] font-mono truncate tabular-nums ${amountColor}`}>
+                          {currencySymbol}{dayTotal >= 1000 ? `${(dayTotal / 1000).toFixed(1)}k` : dayTotal.toFixed(0)}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Selected Date Inspector Panel */}
+            <div className={`col-span-12 lg:col-span-4 ${darkMode ? "bento-card-dark" : "bento-card-light"} flex flex-col justify-between`}>
+              {(() => {
+                const dayList = expensesByDate[selectedCalendarDate] || [];
+                const daySum = dayList.reduce((sum, e) => sum + e.amount, 0);
+
+                return (
+                  <>
+                    <div>
+                      {/* Header */}
+                      <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+                        <div>
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Date Inspector</span>
+                          <h4 className="font-bold text-sm text-white font-mono">{selectedCalendarDate}</h4>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-400 font-mono block">Day Total</span>
+                          {(() => {
+                            const inspectorTier = getDaySpendingTier(daySum);
+                            const totalColor = inspectorTier === "high" 
+                              ? "text-rose-400" 
+                              : inspectorTier === "average" 
+                              ? "text-amber-400" 
+                              : daySum > 0 
+                              ? "text-emerald-400" 
+                              : "text-slate-400";
+                            return (
+                              <span className={`text-sm font-mono font-bold tabular-nums ${totalColor}`}>
+                                {currencySymbol}{daySum.toFixed(2)}
                               </span>
-                            </div>
-                            <p className={`text-xs font-medium truncate ${darkMode ? "text-slate-300" : "text-slate-700"}`}>
-                              {details.topTx.description}
-                            </p>
-                            {details.topTx.notes && (
-                              <p className="text-[10px] text-slate-500 mt-1 italic truncate">
-                                "{details.topTx.notes}"
-                              </p>
-                            )}
-                          </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Items List */}
+                      <div className="my-3 space-y-2 max-h-64 overflow-y-auto pr-1">
+                        {dayList.length > 0 ? (
+                          dayList.map((item) => {
+                            const cStyle = getCategoryStyle(item.category);
+                            const pStyle = getPaymentStyle(item.paymentMode);
+                            return (
+                              <div 
+                                key={item.id} 
+                                className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-between"
+                              >
+                                <div className="truncate max-w-[170px]">
+                                  <div className="text-xs font-semibold text-white truncate">{item.description}</div>
+                                  <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                                    <span className={`inline-flex items-center gap-1 font-semibold px-1.5 py-0.2 rounded border ${cStyle.bg} ${cStyle.border} ${cStyle.text}`}>
+                                      <span className={`w-1 h-1 rounded-full ${cStyle.dot}`} />
+                                      {item.category}
+                                    </span>
+                                    <span>·</span>
+                                    <span className={`px-1 rounded border ${pStyle.bg} ${pStyle.border} ${pStyle.text}`}>
+                                      {item.paymentMode}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <div className="text-xs font-mono font-bold text-emerald-400 tabular-nums">
+                                    {currencySymbol}{item.amount.toFixed(2)}
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      setExpenseToEdit(item);
+                                      setIsModalOpen(true);
+                                    }}
+                                    className="text-[10px] text-emerald-400 hover:underline font-mono mt-0.5 inline-block cursor-pointer font-semibold"
+                                  >
+                                    Edit
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
                         ) : (
-                          <div className="text-xs text-slate-500 italic py-2 text-center">
-                            No transactions recorded this month.
+                          <div className="py-12 text-center text-slate-500 text-xs italic font-mono">
+                            No expenses recorded on this date.
                           </div>
                         )}
                       </div>
                     </div>
-                  );
-                })()}
 
-                {/* Footer action */}
-                <div className="text-center pt-2 border-t border-slate-800/10">
-                  <button
-                    onClick={() => {
-                      const [y, m] = selectedMonthDetails.split("-");
-                      setYearFilter(y);
-                      setMonthFilter(m);
-                      setSelectedMonthDetails(null);
-                    }}
-                    className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition shadow-sm cursor-pointer"
-                  >
-                    Filter Dashboard by this Month
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-
-        {/* Quick Metrics & Actions panel */}
-        <motion.div variants={cardVariants} className={`col-span-12 lg:col-span-4 flex flex-col justify-between transition-all duration-300 ${
-          darkMode ? "bento-card-dark" : "bento-card-light"
-        }`}>
-          <div>
-            <h3 className={`font-bold text-base ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>Data Management</h3>
-            <p className="text-xs text-slate-400 mb-4">Backup, export, or parse spreadsheet budgets</p>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              
-              {/* PDF Export */}
-              <button
-                id="export-pdf-action-btn"
-                onClick={() => exportToPDF(filteredExpenses, profile?.name || "User", profile?.email || "", currencySymbol, activeBudget)}
-                className={`p-3 rounded-xl text-left transition group cursor-pointer border ${
-                  darkMode ? "bg-slate-950/40 hover:bg-slate-800/40 border-slate-800/60 hover:border-emerald-500/30" : "bg-slate-50 hover:bg-slate-100 border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <Download className="w-5 h-5 text-rose-500 mb-1.5 group-hover:scale-110 transition" />
-                <h4 className={`text-xs font-semibold ${darkMode ? "text-slate-200" : "text-slate-850"}`}>Export PDF</h4>
-                <p className="text-[10px] text-slate-500 mt-0.5">Generates comprehensive tabular breakdown reports.</p>
-              </button>
-
-              {/* Excel Export */}
-              <button
-                id="export-excel-action-btn"
-                onClick={() => exportToExcel(filteredExpenses, currencySymbol)}
-                className={`p-3 rounded-xl text-left transition group cursor-pointer border ${
-                  darkMode ? "bg-slate-950/40 hover:bg-slate-800/40 border-slate-800/60 hover:border-emerald-500/30" : "bg-slate-50 hover:bg-slate-100 border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <FileSpreadsheet className="w-5 h-5 text-emerald-500 mb-1.5 group-hover:scale-110 transition" />
-                <h4 className={`text-xs font-semibold ${darkMode ? "text-slate-200" : "text-slate-850"}`}>Export Excel</h4>
-                <p className="text-[10px] text-slate-500 mt-0.5">Microsoft Excel & Google Sheets fully compatible.</p>
-              </button>
-
-              {/* CSV Export */}
-              <button
-                id="export-csv-action-btn"
-                onClick={() => exportToCSV(filteredExpenses, currencySymbol)}
-                className={`p-3 rounded-xl text-left transition group cursor-pointer border ${
-                  darkMode ? "bg-slate-950/40 hover:bg-slate-800/40 border-slate-800/60 hover:border-emerald-500/30" : "bg-slate-50 hover:bg-slate-100 border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <Download className="w-5 h-5 text-blue-500 mb-1.5 group-hover:scale-110 transition" />
-                <h4 className={`text-xs font-semibold ${darkMode ? "text-slate-200" : "text-slate-850"}`}>Export CSV</h4>
-                <p className="text-[10px] text-slate-500 mt-0.5">Universal format for databases & spreadsheets.</p>
-              </button>
-
-              {/* Bulk Import Slot (Spreadsheet) */}
-              <div className={`p-3 border border-dashed rounded-xl text-left transition relative group ${
-                darkMode ? "bg-slate-950/40 border-slate-700 hover:border-emerald-500/50" : "bg-slate-50 border-slate-300 hover:border-emerald-500/50"
-              }`}>
-                <Upload className="w-5 h-5 text-purple-500 mb-1.5 group-hover:scale-110 transition" />
-                <h4 className={`text-xs font-semibold ${darkMode ? "text-slate-200" : "text-slate-850"}`}>Import Sheets</h4>
-                <p className="text-[10px] text-slate-500 mt-0.5">Upload .xlsx or .csv to batch upload logs.</p>
-                
-                <input
-                  id="bulk-import-file-uploader"
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={handleBulkImport}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
-              </div>
-
+                    {/* Bottom Actions */}
+                    <div className="pt-3 border-t border-white/[0.08] flex gap-2">
+                      <button
+                        onClick={() => {
+                          setExpenseToEdit(null);
+                          setIsModalOpen(true);
+                        }}
+                        className="flex-1 py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Log for this Date</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStartDateFilter(selectedCalendarDate);
+                          setEndDateFilter(selectedCalendarDate);
+                          setActiveTab("transactions");
+                          showNotification(`Filtered ledger to ${selectedCalendarDate}`, "success");
+                        }}
+                        className="py-2 px-3 rounded-xl border border-white/10 hover:bg-white/5 text-slate-300 text-xs font-semibold transition cursor-pointer"
+                        title="Filter spreadsheet table"
+                      >
+                        <Filter className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
-          </div>
 
-          <div className="mt-4 pt-4 border-t border-slate-800/20 flex items-center gap-2 text-[10px] text-slate-400">
-            <Info className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span>Required mapping layout: Date, Category, Description, Amount, Mode, Notes.</span>
           </div>
-        </motion.div>
+        )}
 
-        {/* ROW 4: TRANSACTIONS TABLE & SEARCH / FILTER BLOCK (Full width 12 columns) */}
-        <motion.div variants={cardVariants} className={`col-span-12 p-6 rounded-2xl transition-all duration-300 ${
-          darkMode ? "bento-card-dark" : "bento-card-light"
-        }`}>
-          
-          {/* Header Controls */}
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+        {/* =========================================================================
+            SECTION: DATA MANAGEMENT & EXPORT SUITE (Always accessible on 'transactions' and 'overview')
+           ========================================================================= */}
+        <div className={`p-4 rounded-2xl ${darkMode ? "bg-white/[0.02] border border-white/[0.06]" : "bg-white border border-slate-200 shadow-sm light-surface"}`}>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-3">
             <div>
-              <h3 className={`font-bold text-base ${darkMode ? "text-[#f8fafc]" : "text-slate-900"}`}>Expense Transactions</h3>
-              <p className="text-xs text-slate-400">Manage, search, and filter transaction history</p>
+              <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">
+                Financial Report Export & Spreadsheet Integration
+              </h4>
+              <p className="text-[11px] text-slate-400">Download formatted accounting statements or batch ingest records</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {/* PDF Export */}
+            <button
+              id="export-pdf-action-btn"
+              onClick={() => exportToPDF(filteredExpenses, profile?.name || "User", profile?.email || "", currencySymbol, activeBudget)}
+              className="p-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.08] hover:border-emerald-500/30 text-left transition cursor-pointer group"
+            >
+              <Download className="w-4 h-4 text-rose-400 mb-1.5 group-hover:scale-110 transition" />
+              <div className="text-xs font-bold text-white">Export PDF</div>
+              <p className="text-[10px] text-slate-400 mt-0.5">Formal executive tabular statement</p>
+            </button>
+
+            {/* Excel Export */}
+            <button
+              id="export-excel-action-btn"
+              onClick={() => exportToExcel(filteredExpenses, currencySymbol)}
+              className="p-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.08] hover:border-emerald-500/30 text-left transition cursor-pointer group"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-400 mb-1.5 group-hover:scale-110 transition" />
+              <div className="text-xs font-bold text-white">Export Excel</div>
+              <p className="text-[10px] text-slate-400 mt-0.5">XLSX workbook with styling</p>
+            </button>
+
+            {/* CSV Export */}
+            <button
+              id="export-csv-action-btn"
+              onClick={() => exportToCSV(filteredExpenses, currencySymbol)}
+              className="p-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.08] hover:border-emerald-500/30 text-left transition cursor-pointer group"
+            >
+              <Download className="w-4 h-4 text-cyan-400 mb-1.5 group-hover:scale-110 transition" />
+              <div className="text-xs font-bold text-white">Export CSV</div>
+              <p className="text-[10px] text-slate-400 mt-0.5">Universal raw data stream</p>
+            </button>
+
+            {/* Bulk File Ingestion */}
+            <div className="p-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-dashed border-white/20 hover:border-emerald-500/50 text-left transition relative group cursor-pointer">
+              <Upload className="w-4 h-4 text-purple-400 mb-1.5 group-hover:scale-110 transition" />
+              <div className="text-xs font-bold text-white">Import Records</div>
+              <p className="text-[10px] text-slate-400 mt-0.5">Upload .xlsx or .csv files</p>
+              <input
+                id="bulk-import-file-uploader"
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                onChange={handleBulkImport}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* =========================================================================
+            SECTION: TRANSACTIONS LEDGER SPREADSHEET TABLE (Full Width)
+           ========================================================================= */}
+        <div className={`p-5 rounded-2xl ${darkMode ? "bento-card-dark" : "bento-card-light"}`}>
+          
+          {/* Table Header Controls */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-5">
+            <div>
+              <h3 className="text-base font-bold text-white">Ledger Transactions</h3>
+              <p className="text-xs text-slate-400">Search, filter, and inspect detailed account entries</p>
             </div>
 
-            <div className="flex items-center gap-2 sm:gap-3 w-full md:w-auto">
-              
-              {/* Dynamic Search */}
-              <div className="relative flex-1 md:w-64 md:flex-initial">
-                <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-500">
-                  <Search className="w-4 h-4" />
-                </span>
+            <div className="flex items-center gap-2.5 w-full md:w-auto">
+              {/* Live Search */}
+              <div className="relative flex-1 md:w-72">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   id="expense-search-input"
                   type="text"
-                  placeholder="Search description, notes..."
+                  placeholder="Search description, tags, notes..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className={`w-full border rounded-xl py-2 pl-9 pr-4 text-xs focus:outline-none focus:border-emerald-500 ${
-                    darkMode ? "bg-slate-950 border-slate-800 text-slate-200" : "bg-slate-50 border-slate-200 text-slate-800"
-                  }`}
+                  className="w-full bg-slate-950/70 border border-white/10 rounded-xl py-2 pl-9 pr-3 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 font-sans"
                 />
               </div>
 
-              {/* Filter toggle */}
+              {/* Filter Panel Toggle */}
               <button
                 id="filter-toggle-btn"
                 onClick={() => setShowFilters(!showFilters)}
-                className={`p-2.5 border rounded-xl flex items-center justify-center transition cursor-pointer shrink-0 ${
-                  showFilters 
-                    ? "bg-emerald-500/10 border-emerald-500 text-emerald-400" 
-                    : darkMode 
-                    ? "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
-                    : "bg-slate-50 border-slate-200 text-slate-500 hover:text-slate-700"
+                className={`p-2 rounded-xl border transition cursor-pointer flex items-center gap-1.5 text-xs font-semibold ${
+                  showFilters
+                    ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-300"
+                    : "bg-white/[0.04] border-white/10 text-slate-300 hover:text-white"
                 }`}
               >
-                <Filter className="w-4 h-4" />
+                <Filter className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Filters</span>
               </button>
 
-              {/* Add Expense Trigger */}
+              {/* Scan Bill OCR CTA */}
               <button
-                id="add-expense-trigger-btn"
+                id="ledger-scan-bill-btn"
+                onClick={() => setIsReceiptScannerOpen(true)}
+                className="px-3.5 py-2 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/40 text-purple-300 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm shrink-0"
+                title="Scan Bill or Receipt with Gemini AI OCR"
+              >
+                <ScanLine className="w-3.5 h-3.5 text-purple-400" />
+                <span className="hidden sm:inline">Scan Bill</span>
+              </button>
+
+              {/* Record CTA */}
+              <button
                 onClick={() => {
                   setExpenseToEdit(null);
                   setIsModalOpen(true);
                 }}
-                className="px-3 sm:px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold rounded-xl text-xs flex items-center gap-1.5 shrink-0 hover:scale-[1.01] transition duration-200 shadow-lg shadow-emerald-500/15 cursor-pointer"
+                className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shrink-0"
               >
-                <Plus className="w-4 h-4" />
-                Add Expense
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Record</span>
               </button>
-
             </div>
           </div>
 
-          {/* Expanded Filter Panel */}
+          {/* Collapsible Filter Toolbar */}
           <AnimatePresence>
             {showFilters && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden border-b border-slate-800/50 mb-6"
+                className="overflow-hidden border-b border-white/[0.08] pb-4 mb-4"
               >
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 pb-4">
-                  
-                  {/* Category Filter */}
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
                   <div>
-                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Category</label>
+                    <label className="block text-[10px] uppercase font-mono text-slate-400 mb-1">Category</label>
                     <select
                       id="filter-category-select"
                       value={categoryFilter}
                       onChange={(e) => setCategoryFilter(e.target.value)}
-                      className={`w-full border rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
-                      }`}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl py-1.5 px-2.5 text-xs text-white"
                     >
                       <option value="All">All Categories</option>
                       {availableCategories.map((c) => (
@@ -2668,16 +2328,13 @@ export default function App() {
                     </select>
                   </div>
 
-                  {/* Payment Filter */}
                   <div>
-                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Payment Mode</label>
+                    <label className="block text-[10px] uppercase font-mono text-slate-400 mb-1">Payment Mode</label>
                     <select
                       id="filter-payment-select"
                       value={paymentFilter}
                       onChange={(e) => setPaymentFilter(e.target.value)}
-                      className={`w-full border rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
-                      }`}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl py-1.5 px-2.5 text-xs text-white"
                     >
                       <option value="All">All Modes</option>
                       <option value="Cash">Cash</option>
@@ -2688,208 +2345,145 @@ export default function App() {
                     </select>
                   </div>
 
-                  {/* Month Filter */}
                   <div>
-                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Month</label>
+                    <label className="block text-[10px] uppercase font-mono text-slate-400 mb-1">Month</label>
                     <select
                       id="filter-month-select"
                       value={monthFilter}
                       onChange={(e) => setMonthFilter(e.target.value)}
-                      className={`w-full border rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
-                      }`}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl py-1.5 px-2.5 text-xs text-white"
                     >
                       <option value="All">All Months</option>
-                      <option value="01">January</option>
-                      <option value="02">February</option>
-                      <option value="03">March</option>
-                      <option value="04">April</option>
-                      <option value="05">May</option>
-                      <option value="06">June</option>
-                      <option value="07">July</option>
-                      <option value="08">August</option>
-                      <option value="09">September</option>
-                      <option value="10">October</option>
-                      <option value="11">November</option>
-                      <option value="12">December</option>
-                    </select>
-                  </div>
-
-                  {/* Year Filter */}
-                  <div>
-                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Year</label>
-                    <select
-                      id="filter-year-select"
-                      value={yearFilter}
-                      onChange={(e) => setYearFilter(e.target.value)}
-                      className={`w-full border rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
-                      }`}
-                    >
-                      <option value="All">All Years</option>
-                      {availableYears.map((y) => (
-                        <option key={y} value={y}>{y}</option>
+                      {MONTH_NAMES.map((name, i) => (
+                        <option key={name} value={String(i + 1).padStart(2, "0")}>{name}</option>
                       ))}
                     </select>
                   </div>
 
-                  {/* Custom From Date Filter */}
                   <div>
-                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">From Date</label>
+                    <label className="block text-[10px] uppercase font-mono text-slate-400 mb-1">From Date</label>
                     <input
                       id="filter-start-date-input"
                       type="date"
                       value={startDateFilter}
                       onChange={(e) => setStartDateFilter(e.target.value)}
-                      className={`w-full border rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
-                      }`}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl py-1.5 px-2 text-xs text-white font-mono"
                     />
                   </div>
 
-                  {/* Custom To Date Filter */}
                   <div>
-                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">To Date</label>
+                    <label className="block text-[10px] uppercase font-mono text-slate-400 mb-1">To Date</label>
                     <input
                       id="filter-end-date-input"
                       type="date"
                       value={endDateFilter}
                       onChange={(e) => setEndDateFilter(e.target.value)}
-                      className={`w-full border rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
-                      }`}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl py-1.5 px-2 text-xs text-white font-mono"
                     />
                   </div>
 
-                  {/* Amount Min/Max */}
-                  <div className="col-span-2 md:col-span-1">
-                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Amount Range</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="filter-min-amount-input"
-                        type="number"
-                        placeholder="Min"
-                        value={minAmount}
-                        onChange={(e) => setMinAmount(e.target.value)}
-                        className={`w-1/2 border rounded-xl py-2 px-2.5 text-xs focus:outline-none focus:border-emerald-500 ${
-                          darkMode ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
-                        }`}
-                      />
-                      <span className="text-slate-600 text-xs">-</span>
-                      <input
-                        id="filter-max-amount-input"
-                        type="number"
-                        placeholder="Max"
-                        value={maxAmount}
-                        onChange={(e) => setMaxAmount(e.target.value)}
-                        className={`w-1/2 border rounded-xl py-2 px-2.5 text-xs focus:outline-none focus:border-emerald-500 ${
-                          darkMode ? "bg-slate-950 border-slate-800 text-slate-300" : "bg-slate-50 border-slate-200 text-slate-700"
-                        }`}
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-mono text-slate-400 mb-1">Amount Max</label>
+                    <input
+                      id="filter-max-amount-input"
+                      type="number"
+                      placeholder="Max Amount"
+                      value={maxAmount}
+                      onChange={(e) => setMaxAmount(e.target.value)}
+                      className="w-full bg-slate-950 border border-white/10 rounded-xl py-1.5 px-2.5 text-xs text-white font-mono"
+                    />
                   </div>
-
                 </div>
 
-                {/* Reset Filters Option */}
-                {(startDateFilter || endDateFilter || categoryFilter !== "All" || paymentFilter !== "All" || monthFilter !== "All" || yearFilter !== "All" || minAmount || maxAmount) && (
-                  <div className="flex justify-end gap-2 pb-4">
-                    <button
-                      id="clear-all-filters-btn"
-                      type="button"
-                      onClick={() => {
-                        setStartDateFilter("");
-                        setEndDateFilter("");
-                        setCategoryFilter("All");
-                        setPaymentFilter("All");
-                        setMonthFilter("All");
-                        setYearFilter("All");
-                        setMinAmount("");
-                        setMaxAmount("");
-                        showNotification("All transaction filters reset successfully!", "info");
-                      }}
-                      className={`text-[10px] font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer flex items-center gap-1 ${
-                        darkMode 
-                          ? "bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300" 
-                          : "bg-white hover:bg-slate-50 border-slate-200 text-slate-600"
-                      }`}
-                    >
-                      <X className="w-3 h-3" />
-                      <span>Reset All Filters</span>
-                    </button>
-                  </div>
-                )}
+                <div className="flex justify-end gap-2 pt-3">
+                  <button
+                    id="clear-all-filters-btn"
+                    onClick={() => {
+                      setStartDateFilter("");
+                      setEndDateFilter("");
+                      setCategoryFilter("All");
+                      setPaymentFilter("All");
+                      setMonthFilter("All");
+                      setYearFilter("All");
+                      setMinAmount("");
+                      setMaxAmount("");
+                      showNotification("Filters cleared", "info");
+                    }}
+                    className="text-xs font-semibold text-slate-400 hover:text-white px-3 py-1 rounded-lg border border-white/10 hover:bg-white/5 transition"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Spreadsheet Table Container (Desktop & Tablet) */}
-          <div className={`hidden md:block overflow-x-auto border rounded-2xl ${
-            darkMode ? "border-slate-800/85 bg-slate-950/20" : "border-slate-200 bg-slate-50/20"
-          }`}>
-            <table className="w-full text-left border-collapse text-xs">
+          {/* Desktop & Tablet Table */}
+          <div className="hidden md:block overflow-x-auto rounded-xl border border-white/[0.08]">
+            <table className="w-full text-left text-xs">
               <thead>
-                <tr className={`border-b font-medium ${
-                  darkMode ? "bg-[#0f172a] border-slate-800 text-slate-400" : "bg-slate-100 border-slate-200 text-slate-600"
-                }`}>
-                  <th className="py-3 px-4 font-semibold">Date</th>
-                  <th className="py-3 px-4 font-semibold">Category</th>
-                  <th className="py-3 px-4 font-semibold">Description</th>
-                  <th className="py-3 px-4 font-semibold">Amount</th>
-                  <th className="py-3 px-4 font-semibold">Mode</th>
-                  <th className="py-3 px-4 font-semibold">Notes</th>
-                  <th className="py-3 px-4 font-semibold text-right">Actions</th>
+                <tr className="border-b border-white/[0.08] bg-white/[0.02] text-slate-400 font-mono uppercase text-[10px]">
+                  <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4">Category</th>
+                  <th className="py-3 px-4">Description</th>
+                  <th className="py-3 px-4 text-right">Amount</th>
+                  <th className="py-3 px-4">Channel</th>
+                  <th className="py-3 px-4">Notes</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className={`divide-y ${darkMode ? "divide-slate-850" : "divide-slate-200"}`}>
+              <tbody className="divide-y divide-white/[0.05]">
                 {filteredExpenses.length > 0 ? (
-                  filteredExpenses.map((e) => (
-                    <tr key={e.id} className={`transition ${
-                      darkMode ? "hover:bg-slate-900/40 text-slate-300" : "hover:bg-slate-100/40 text-slate-700"
-                    }`}>
-                      <td className="py-3 px-4 font-mono">{e.date}</td>
-                      <td className={`py-3 px-4 font-medium ${darkMode ? "text-white" : "text-slate-900"}`}>{e.category}</td>
-                      <td className="py-3 px-4 font-medium">{e.description}</td>
-                      <td className="py-3 px-4 font-bold text-emerald-500 font-mono">
-                        {currencySymbol}{e.amount.toFixed(2)}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={`py-0.5 px-2 border rounded-full text-[10px] ${
-                          darkMode ? "bg-slate-800 border-slate-700/50 text-slate-300" : "bg-slate-100 border-slate-200 text-slate-600"
-                        }`}>
-                          {e.paymentMode}
-                        </span>
-                      </td>
-                      <td className={`py-3 px-4 max-w-xs truncate ${darkMode ? "text-slate-500" : "text-slate-400"}`}>{e.notes || "-"}</td>
-                      <td className="py-3 px-4 text-right space-x-1 shrink-0">
-                        <button
-                          id={`edit-expense-btn-${e.id}`}
-                          onClick={() => {
-                            setExpenseToEdit(e);
-                            setIsModalOpen(true);
-                          }}
-                          className={`p-1.5 rounded-lg transition cursor-pointer inline-flex items-center ${
-                            darkMode ? "hover:bg-slate-800 text-slate-400 hover:text-emerald-400" : "hover:bg-slate-100 text-slate-500 hover:text-emerald-600"
-                          }`}
-                        >
-                          <Edit className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          id={`delete-expense-btn-${e.id}`}
-                          onClick={() => e.id && handleDeleteExpense(e.id)}
-                          className={`p-1.5 rounded-lg transition cursor-pointer inline-flex items-center ${
-                            darkMode ? "hover:bg-slate-800 text-slate-400 hover:text-rose-400" : "hover:bg-slate-100 text-slate-500 hover:text-rose-600"
-                          }`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  filteredExpenses.map((exp) => {
+                    const catStyle = getCategoryStyle(exp.category);
+                    const payStyle = getPaymentStyle(exp.paymentMode);
+                    return (
+                      <tr key={exp.id} className="hover:bg-white/[0.03] transition group">
+                        <td className="py-3 px-4 font-mono text-slate-400 whitespace-nowrap">{exp.date}</td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-flex items-center gap-1.5 font-semibold text-xs px-2.5 py-0.5 rounded-lg border ${catStyle.bg} ${catStyle.border} ${catStyle.text}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${catStyle.dot}`} />
+                            {exp.category}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-medium text-slate-200">{exp.description}</td>
+                        <td className="py-3 px-4 text-right font-mono font-bold text-emerald-400 tabular-nums">
+                          {currencySymbol}{exp.amount.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${payStyle.bg} ${payStyle.border} ${payStyle.text}`}>
+                            {exp.paymentMode}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-400 max-w-xs truncate">{exp.notes || "—"}</td>
+                        <td className="py-3 px-4 text-right space-x-1 whitespace-nowrap">
+                          <button
+                            id={`edit-expense-btn-${exp.id}`}
+                            onClick={() => {
+                              setExpenseToEdit(exp);
+                              setIsModalOpen(true);
+                            }}
+                            className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-emerald-400 transition cursor-pointer"
+                            title="Edit Record"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            id={`delete-expense-btn-${exp.id}`}
+                            onClick={() => requestDeleteExpense(exp)}
+                            title="Delete transaction record"
+                            className="p-1.5 hover:bg-rose-500/10 rounded-lg text-slate-400 hover:text-rose-400 transition cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 ) : (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-500 italic">
-                      No matching transactions found. Please log some expenses!
+                    <td colSpan={7} className="py-12 text-center text-slate-500 font-mono italic text-xs">
+                      No matching transaction entries found.
                     </td>
                   </tr>
                 )}
@@ -2897,101 +2491,72 @@ export default function App() {
             </table>
           </div>
 
-          {/* Card-based list for mobile */}
-          <div className="block md:hidden space-y-3">
-            {filteredExpenses.length > 0 ? (
-              filteredExpenses.map((e) => (
-                <div
-                  key={e.id}
-                  className={`p-4 border rounded-2xl flex flex-col gap-3 transition-all ${
-                    darkMode 
-                      ? "border-slate-800/80 bg-slate-900/10 hover:bg-slate-900/30" 
-                      : "border-slate-200 bg-slate-50/20 hover:bg-slate-50/40"
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`text-xs font-bold ${darkMode ? "text-white" : "text-slate-900"}`}>
-                          {e.category}
+          {/* Mobile Card List (Refined, colored, and touch-friendly for all phones) */}
+          <div className="md:hidden space-y-3">
+            {filteredExpenses.map((exp) => {
+              const catStyle = getCategoryStyle(exp.category);
+              const payStyle = getPaymentStyle(exp.paymentMode);
+              return (
+                <div key={exp.id} className="p-3.5 rounded-2xl bg-[#0d1424]/90 border border-white/[0.08] shadow-sm hover:border-white/15 transition space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md border ${catStyle.bg} ${catStyle.border} ${catStyle.text}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${catStyle.dot}`} />
+                          {exp.category}
                         </span>
-                        <span className={`py-0.5 px-2 border rounded-full text-[9px] font-semibold ${
-                          darkMode 
-                            ? "bg-slate-800/80 border-slate-700/40 text-slate-300" 
-                            : "bg-slate-100/80 border-slate-200/60 text-slate-600"
-                        }`}>
-                          {e.paymentMode}
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full border ${payStyle.bg} ${payStyle.border} ${payStyle.text}`}>
+                          {exp.paymentMode}
                         </span>
                       </div>
-                      <p className={`text-xs mt-1.5 font-medium leading-relaxed ${darkMode ? "text-slate-300" : "text-slate-750"}`}>
-                        {e.description}
-                      </p>
+                      <h5 className="font-semibold text-white text-xs sm:text-sm pt-0.5">{exp.description}</h5>
                     </div>
-                    <div className="text-right flex flex-col items-end shrink-0 pl-2">
-                      <span className="text-sm font-extrabold text-emerald-500 font-mono">
-                        {currencySymbol}{e.amount.toFixed(2)}
+                    <div className="text-right shrink-0">
+                      <span className="text-base font-mono font-bold text-emerald-400 tabular-nums block">
+                        {currencySymbol}{exp.amount.toFixed(2)}
                       </span>
-                      <span className="text-[10px] text-slate-500 font-mono mt-0.5">{e.date}</span>
+                      <span className="text-[10px] text-slate-400 font-mono block mt-0.5">{exp.date}</span>
                     </div>
                   </div>
 
-                  {e.notes && (
-                    <div className={`text-[10px] p-2.5 rounded-xl border leading-relaxed ${
-                      darkMode ? "bg-slate-950/40 border-slate-800/50 text-slate-400" : "bg-slate-100/30 border-slate-200/50 text-slate-500"
-                    }`}>
-                      {e.notes}
-                    </div>
+                  {exp.notes && (
+                    <p className="text-[11px] text-slate-300 italic bg-black/25 px-2.5 py-1.5 rounded-lg border border-white/[0.04]">
+                      {exp.notes}
+                    </p>
                   )}
 
-                  <div className={`flex items-center justify-between pt-2.5 border-t ${
-                    darkMode ? "border-slate-800/40" : "border-slate-200/40"
-                  }`}>
-                    <span className="text-[10px] text-slate-500 font-medium">Quick Actions</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        id={`mobile-edit-btn-${e.id}`}
-                        onClick={() => {
-                          setExpenseToEdit(e);
-                          setIsModalOpen(true);
-                        }}
-                        className={`p-2 rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer transition ${
-                          darkMode 
-                            ? "hover:bg-slate-800 text-slate-400 hover:text-emerald-400" 
-                            : "hover:bg-slate-100 text-slate-500 hover:text-emerald-600"
-                        }`}
-                      >
-                        <Edit className="w-4 h-4" />
-                        <span>Edit</span>
-                      </button>
-                      <button
-                        id={`mobile-delete-btn-${e.id}`}
-                        onClick={() => e.id && handleDeleteExpense(e.id)}
-                        className="p-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer transition"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        <span>Delete</span>
-                      </button>
-                    </div>
+                  <div className="flex items-center justify-end gap-2 pt-1 border-t border-white/[0.06] text-xs">
+                    <button
+                      onClick={() => {
+                        setExpenseToEdit(exp);
+                        setIsModalOpen(true);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-emerald-400 font-semibold flex items-center gap-1 transition"
+                    >
+                      <Edit className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      onClick={() => requestDeleteExpense(exp)}
+                      className="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 font-semibold flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Delete</span>
+                    </button>
                   </div>
                 </div>
-              ))
-            ) : (
-              <div className="py-8 text-center text-slate-500 italic text-xs">
-                No matching transactions found. Please log some expenses!
-              </div>
-            )}
+              );
+            })}
           </div>
 
-          <div className="mt-4 flex items-center justify-between text-[11px] text-slate-400">
-            <span>Showing {filteredExpenses.length} of {expenses.length} total transactions</span>
-            {filteredExpenses.length > 0 && (
-              <span>Total Spent: {currencySymbol}{totalSpentFiltered.toFixed(2)}</span>
-            )}
+          <div className="mt-4 flex items-center justify-between text-xs text-slate-400 font-mono">
+            <span>{filteredExpenses.length} records displayed</span>
+            <span>Total: {currencySymbol}{totalSpentFiltered.toFixed(2)}</span>
           </div>
 
-        </motion.div>
+        </div>
 
-      </motion.main>
+      </main>
 
       {/* EXPENSE FORM MODAL */}
       <ExpenseModal
@@ -3002,13 +2567,139 @@ export default function App() {
         }}
         expenseToEdit={expenseToEdit}
         onSave={handleSaveExpense}
+        onDelete={executeDeleteExpense}
         customCategories={profile?.customCategories || []}
         onAddCustomCategory={handleAddCustomCategory}
         currency={currencySymbol}
         defaultDate={selectedCalendarDate}
       />
 
-      {/* COLLAPSIBLE USER PROFILE SETTINGS DRAWERS/MODALS */}
+      {/* RECEIPT / BILL OCR SCANNER MODAL */}
+      <ReceiptScannerModal
+        isOpen={isReceiptScannerOpen}
+        onClose={() => setIsReceiptScannerOpen(false)}
+        onLogExpense={async (data) => {
+          await handleSaveExpense(data);
+          showNotification(`Bill "${data.description}" logged via OCR!`, "success");
+        }}
+        onOpenFullModalWithData={(prefilled) => {
+          setExpenseToEdit(prefilled);
+          setIsModalOpen(true);
+        }}
+        currencySymbol={currencySymbol}
+        customCategories={profile?.customCategories || []}
+        darkMode={darkMode}
+      />
+
+      {/* GMAIL AI SPENDING REPORTS & AUTOMATION MODAL */}
+      <GmailReportsModal
+        isOpen={isGmailModalOpen}
+        onClose={() => {
+          setIsGmailModalOpen(false);
+          setGmailInitialReportType(null);
+        }}
+        userEmail={user?.email || "thulasitmk181@gmail.com"}
+        userName={profile?.name || user?.displayName || "Member"}
+        profile={profile}
+        expenses={expenses}
+        monthlyBudget={activeBudget}
+        currencySymbol={currencySymbol}
+        onUpdateGmailSettings={handleUpdateGmailSettings}
+        showNotification={showNotification}
+        initialReportType={gmailInitialReportType}
+        onClearInitialReportType={() => setGmailInitialReportType(null)}
+        darkMode={darkMode}
+      />
+
+      {/* SUPERSTAR RAJINIKANTH PUNCH DIALOGUE & EMOJI BURST POPUP */}
+      <ThalaivarPopup
+        isOpen={isThalaivarPopupOpen}
+        onClose={() => {
+          setIsThalaivarPopupOpen(false);
+          setThalaivarExpense(null);
+        }}
+        expense={thalaivarExpense}
+        currency={currencySymbol}
+        monthlyBudget={activeBudget}
+      />
+
+      {/* TRANSACTION DELETE CONFIRMATION MODAL */}
+      <AnimatePresence>
+        {expenseToDelete && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !isDeletingRecord && setExpenseToDelete(null)}
+              className="fixed inset-0 bg-slate-950/80 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="relative w-full max-w-md bg-gradient-to-b from-slate-900 to-slate-950 border border-rose-500/30 rounded-2xl p-6 shadow-2xl shadow-rose-950/40 z-10"
+            >
+              <div className="flex items-center gap-3.5 text-rose-400 mb-4">
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl">
+                  <Trash2 className="w-6 h-6 text-rose-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Delete Transaction Record?</h3>
+                  <p className="text-xs text-slate-400">Permanently delete this entry from your cloud ledger.</p>
+                </div>
+              </div>
+
+              {/* Expense summary preview */}
+              <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 mb-5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-white truncate max-w-[220px]">
+                    {expenseToDelete.description || "Untitled Transaction"}
+                  </span>
+                  <span className="text-base font-mono font-bold text-rose-400 tabular-nums">
+                    {currencySymbol}{Number(expenseToDelete.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px]">
+                    {expenseToDelete.category}
+                  </span>
+                  <span>{expenseToDelete.date} · {expenseToDelete.paymentMode}</span>
+                </div>
+                {expenseToDelete.notes && (
+                  <p className="text-[11px] text-slate-400 italic border-t border-white/[0.06] pt-1.5 mt-1 truncate">
+                    Note: {expenseToDelete.notes}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  id="cancel-delete-expense-btn"
+                  type="button"
+                  disabled={isDeletingRecord}
+                  onClick={() => setExpenseToDelete(null)}
+                  className="px-4 py-2.5 rounded-xl border border-white/10 hover:bg-white/[0.06] text-xs font-semibold text-slate-300 transition cursor-pointer disabled:opacity-50"
+                >
+                  Cancel / Keep
+                </button>
+                <button
+                  id="confirm-delete-expense-btn"
+                  type="button"
+                  disabled={isDeletingRecord || !expenseToDelete.id}
+                  onClick={() => expenseToDelete.id && executeDeleteExpense(expenseToDelete.id)}
+                  className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition shadow-lg shadow-rose-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isDeletingRecord ? "Deleting..." : "Yes, Delete Record"}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* USER PROFILE & TRACKER SETTINGS MODAL */}
       <AnimatePresence>
         {isProfileOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -3017,436 +2708,182 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsProfileOpen(false)}
-              className="absolute inset-0 bg-slate-950/70 backdrop-blur-xs"
+              className="fixed inset-0 bg-slate-950/80 backdrop-blur-md"
             />
             
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl relative z-10 overflow-hidden text-slate-100"
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="w-full max-w-lg bg-[#0e1422] border border-white/10 rounded-3xl shadow-2xl relative z-10 overflow-hidden text-slate-100"
               id="user-profile-settings-modal"
             >
-              <div className="px-6 py-4 bg-slate-850 border-b border-slate-800 flex items-center justify-between">
-                <h3 className="font-bold text-white text-sm flex items-center gap-2">
-                  <Settings className="w-4 h-4 text-emerald-400" />
-                  Tracker Preferences
-                </h3>
+              <div className="px-6 py-4.5 bg-slate-900/70 border-b border-white/[0.08] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <Settings className="w-4 h-4" />
+                  </div>
+                  <h3 className="font-bold text-white text-sm">Ledger Configuration</h3>
+                </div>
                 <button
                   id="close-profile-settings-btn"
                   onClick={() => setIsProfileOpen(false)}
-                  className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200"
+                  className="p-1.5 hover:bg-white/10 rounded-xl text-slate-400 hover:text-white transition cursor-pointer"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
 
               <form onSubmit={handleSaveProfile} className="p-6">
-                <div className="max-h-[60vh] overflow-y-auto pr-1 space-y-5">
+                <div className="max-h-[64vh] overflow-y-auto pr-1 space-y-4 text-xs">
                   
-                  {/* Section 1: Basic Profile */}
-                  <div className="space-y-4">
-                    <h4 className="text-[11px] uppercase font-bold tracking-wider text-slate-400 pb-1 border-b border-slate-800/60">Basic Configuration</h4>
-                    
+                  {/* Basic Profile */}
+                  <div className="space-y-3">
+                    <h4 className="text-[10px] uppercase font-mono tracking-wider text-slate-400 font-bold pb-1 border-b border-white/[0.08]">
+                      Account Credentials
+                    </h4>
                     <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1">Your Full Name</label>
+                      <label className="block text-slate-400 mb-1 font-semibold">User Display Name</label>
                       <input
                         id="profile-name-input"
                         type="text"
                         required
                         value={profileName}
                         onChange={(e) => setProfileName(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-emerald-500"
+                        className="w-full bg-slate-950 border border-white/10 rounded-xl py-2 px-3 text-white focus:outline-none focus:border-emerald-500"
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs font-semibold text-slate-400 mb-1 flex items-center justify-between">
-                          <span>Monthly Budget Limit</span>
-                        </label>
-                        <div className="relative">
-                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 font-mono text-xs text-slate-400">
-                            {profileCurrency}
-                          </span>
-                          <input
-                            id="profile-budget-input"
-                            type="number"
-                            required
-                            value={profileBudget}
-                            onChange={(e) => setProfileBudget(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-emerald-500"
-                          />
-                        </div>
+                        <label className="block text-slate-400 mb-1 font-semibold">Monthly Budget</label>
+                        <input
+                          id="profile-budget-input"
+                          type="number"
+                          required
+                          value={profileBudget}
+                          onChange={(e) => setProfileBudget(e.target.value)}
+                          className="w-full bg-slate-950 border border-white/10 rounded-xl py-2 px-3 text-white font-mono tabular-nums focus:outline-none focus:border-emerald-500"
+                        />
                       </div>
-
                       <div>
-                        <label className="block text-xs font-semibold text-slate-400 mb-1">Base Currency Symbol</label>
+                        <label className="block text-slate-400 mb-1 font-semibold">Base Currency</label>
                         <select
                           id="profile-currency-select"
                           value={profileCurrency}
                           onChange={(e) => setProfileCurrency(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl py-2 px-3 text-xs text-white focus:outline-none focus:border-emerald-500"
+                          className="w-full bg-slate-950 border border-white/10 rounded-xl py-2 px-3 text-white font-mono"
                         >
-                          <option value="₹">INR (₹)</option>
-                          <option value="$">USD ($)</option>
-                          <option value="€">EUR (€)</option>
-                          <option value="£">GBP (£)</option>
-                          <option value="¥">JPY (¥)</option>
-                          <option value="₩">KRW (₩)</option>
+                          <option value="₹">₹ INR (Rupees)</option>
+                          <option value="$">$ USD (Dollars)</option>
+                          <option value="€">€ EUR (Euros)</option>
+                          <option value="£">£ GBP (Pounds)</option>
+                          <option value="¥">¥ JPY (Yen)</option>
+                          <option value="₩">₩ KRW (Won)</option>
                         </select>
                       </div>
                     </div>
                   </div>
 
-                  {/* Section 2: Custom Date Customization Cycle */}
-                  <div className="space-y-4 pt-2">
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-800/60">
-                      <h4 className="text-[11px] uppercase font-bold tracking-wider text-slate-400">Custom Cycle Goal Tracker</h4>
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          id="custom-period-enabled-toggle"
-                          type="checkbox"
-                          checked={customPeriodEnabled}
-                          onChange={(e) => setCustomPeriodEnabled(e.target.checked)}
-                          className="rounded text-emerald-500 bg-slate-950 border-slate-800 focus:ring-emerald-500/20 w-3.5 h-3.5 cursor-pointer"
-                        />
-                        <label htmlFor="custom-period-enabled-toggle" className="text-[10px] text-slate-300 font-bold cursor-pointer select-none">Enable</label>
-                      </div>
-                    </div>
-
-                    {customPeriodEnabled && (
-                      <motion.div 
-                        initial={{ opacity: 0, y: -5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="p-3.5 rounded-xl bg-slate-950/40 border border-slate-800/60 space-y-3.5"
-                      >
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-[10px] text-slate-400 font-semibold mb-1">Start Date</label>
-                            <input
-                              type="date"
-                              required={customPeriodEnabled}
-                              value={customPeriodStartDate}
-                              onChange={(e) => setCustomPeriodStartDate(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-slate-400 font-semibold mb-1">End Date</label>
-                            <input
-                              type="date"
-                              required={customPeriodEnabled}
-                              value={customPeriodEndDate}
-                              onChange={(e) => setCustomPeriodEndDate(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-lg py-1.5 px-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
-                            />
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-[10px] text-slate-400 font-semibold mb-1">Custom Period Budget Amount (e.g., 15000)</label>
-                          <div className="relative">
-                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 font-mono text-xs text-slate-500">
-                              {profileCurrency}
-                            </span>
-                            <input
-                              type="number"
-                              required={customPeriodEnabled}
-                              value={customPeriodBudget}
-                              onChange={(e) => setCustomPeriodBudget(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-lg py-1.5 pl-7 pr-3 text-xs text-white focus:outline-none focus:border-emerald-500"
-                            />
-                          </div>
-                          <span className="text-[9px] text-slate-500 block mt-1 leading-normal">
-                            Allows tracking expenses precisely between custom ranges (e.g. 23rd June to 23rd July) with dedicated visual progress.
-                          </span>
-                        </div>
-                      </motion.div>
-                    )}
-                  </div>
-
-                  {/* Section 3: Notification Alerts & Budget Warnings */}
+                  {/* Push & Sound Alerts */}
                   <div className="space-y-3 pt-2">
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-800/60">
-                      <h4 className="text-[11px] uppercase font-bold tracking-wider text-slate-400">Budget Warning Alerts</h4>
+                    <div className="flex items-center justify-between pb-1 border-b border-white/[0.08]">
+                      <h4 className="text-[10px] uppercase font-mono tracking-wider text-slate-400 font-bold">
+                        Alert Controls
+                      </h4>
                       <button
                         type="button"
                         onClick={requestPushPermission}
-                        className="text-[9px] px-2 py-0.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded font-semibold transition cursor-pointer"
+                        className="text-[9px] px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold cursor-pointer"
                       >
-                        Enable Push
+                        Push Perms
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                      <label className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-950/20 border border-slate-800/30 cursor-pointer hover:bg-slate-950/40 select-none">
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-950/40 border border-white/5 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={notifyAt80}
                           onChange={(e) => setNotifyAt80(e.target.checked)}
-                          className="rounded text-emerald-500 bg-slate-950 border-slate-800 focus:ring-emerald-500/20 w-4 h-4 cursor-pointer"
+                          className="rounded text-emerald-500 bg-slate-950 border-slate-700 w-3.5 h-3.5 cursor-pointer"
                         />
-                        <span className="text-slate-300">Notify at 80% budget</span>
+                        <span className="text-slate-300">Alert at 80%</span>
                       </label>
-
-                      <label className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-950/20 border border-slate-800/30 cursor-pointer hover:bg-slate-950/40 select-none">
+                      <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-950/40 border border-white/5 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={notifyAt100}
                           onChange={(e) => setNotifyAt100(e.target.checked)}
-                          className="rounded text-emerald-500 bg-slate-950 border-slate-800 focus:ring-emerald-500/20 w-4 h-4 cursor-pointer"
+                          className="rounded text-emerald-500 bg-slate-950 border-slate-700 w-3.5 h-3.5 cursor-pointer"
                         />
-                        <span className="text-slate-300">Notify at 100% budget</span>
+                        <span className="text-slate-300">Alert at 100%</span>
                       </label>
-
-                      <label className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-950/20 border border-slate-800/30 cursor-pointer hover:bg-slate-950/40 select-none">
+                      <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-950/40 border border-white/5 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={soundAlerts}
                           onChange={(e) => setSoundAlerts(e.target.checked)}
-                          className="rounded text-emerald-500 bg-slate-950 border-slate-800 focus:ring-emerald-500/20 w-4 h-4 cursor-pointer"
+                          className="rounded text-emerald-500 bg-slate-950 border-slate-700 w-3.5 h-3.5 cursor-pointer"
                         />
-                        <span className="text-slate-300">Sound chime effects</span>
+                        <span className="text-slate-300">Audio chimes</span>
                       </label>
-
-                      <label className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-950/20 border border-slate-800/30 cursor-pointer hover:bg-slate-950/40 select-none">
+                      <label className="flex items-center gap-2 p-2 rounded-xl bg-slate-950/40 border border-white/5 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={dailyReminders}
                           onChange={(e) => setDailyReminders(e.target.checked)}
-                          className="rounded text-emerald-500 bg-slate-950 border-slate-800 focus:ring-emerald-500/20 w-4 h-4 cursor-pointer"
+                          className="rounded text-emerald-500 bg-slate-950 border-slate-700 w-3.5 h-3.5 cursor-pointer"
                         />
-                        <span className="text-slate-300">Daily entry reminders</span>
-                      </label>
-
-                      <label className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-950/20 border border-slate-800/30 cursor-pointer hover:bg-slate-950/40 col-span-1 sm:col-span-2 select-none">
-                        <input
-                          type="checkbox"
-                          checked={weeklyEmailReports}
-                          onChange={(e) => setWeeklyEmailReports(e.target.checked)}
-                          className="rounded text-emerald-500 bg-slate-950 border-slate-800 focus:ring-emerald-500/20 w-4 h-4 cursor-pointer"
-                        />
-                        <span className="text-slate-300">Weekly email report diagnostics</span>
+                        <span className="text-slate-300">Daily reminder</span>
                       </label>
                     </div>
                   </div>
 
-                  {/* Section 4: Google Chat Integration */}
-                  <div className="space-y-4 pt-4 border-t border-slate-800/60">
-                    <div className="flex items-center justify-between pb-1">
-                      <h4 className="text-[11px] uppercase font-bold tracking-wider text-slate-400">Google Chat Integration</h4>
-                      {(chatWebhookUrl || googleChatToken) ? (
-                        <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 font-semibold flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                          Active
-                        </span>
-                      ) : (
-                        <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full border border-slate-700/60 font-semibold">
-                          Inactive
-                        </span>
-                      )}
+                  {/* Google Chat Webhook */}
+                  <div className="space-y-3 pt-2">
+                    <h4 className="text-[10px] uppercase font-mono tracking-wider text-slate-400 font-bold pb-1 border-b border-white/[0.08]">
+                      Google Chat Integration
+                    </h4>
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-semibold">Incoming Webhook URL</label>
+                      <input
+                        id="gchat-webhook-input"
+                        type="text"
+                        placeholder="https://chat.googleapis.com/v1/spaces/..."
+                        value={chatWebhookUrl}
+                        onChange={(e) => setChatWebhookUrl(e.target.value)}
+                        className="w-full bg-slate-950 border border-white/10 rounded-xl py-1.5 px-3 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
+                      />
                     </div>
-
-                    <p className="text-[11px] text-slate-400 leading-normal">
-                      Receive real-time notifications, budget warning alerts, and automated spending summaries directly in your Google Chat spaces. You can use an <strong>Incoming Webhook</strong> or connect via <strong>Google Account Login</strong>.
-                    </p>
-
-                    <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-400 leading-normal">
-                      <strong>⚠️ Google API 404 Error?</strong> If you get a 404 error saying <em>"Google Chat app not found"</em> while using Google Account OAuth (Option B), this is because Google requires creating and publishing a Chat App in your Google Cloud Console. To bypass this complex setup, we highly recommend using <strong>Option A (Incoming Webhook)</strong> for your <strong>expense tracker</strong> space. It works instantly without any Google Cloud project configuration!
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Option A: Webhook URL */}
-                      <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800/60 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-200">Option A: Incoming Webhook</span>
-                          <span className="text-[9px] bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-500/15">Instant & Simple</span>
-                        </div>
-                        <p className="text-[10px] text-slate-400 leading-normal">
-                          Create an Incoming Webhook in your Google Chat space settings and paste the URL below. No login required.
-                        </p>
-                        <div className="space-y-2">
-                          <input
-                            id="gchat-webhook-input"
-                            type="text"
-                            placeholder="https://chat.googleapis.com/v1/spaces/..."
-                            value={chatWebhookUrl}
-                            onChange={(e) => setChatWebhookUrl(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded-lg py-1.5 px-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500"
-                          />
-                          {chatWebhookUrl && (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const confirmed = window.confirm("Send a test greeting via your Google Chat webhook?");
-                                if (confirmed) {
-                                  await sendGoogleChatMessage(`👋 *Hello from TMK Expense Tracker!* \nYour Incoming Webhook is connected and working perfectly!`);
-                                }
-                              }}
-                              className="w-full py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-lg text-xs font-semibold transition cursor-pointer"
-                            >
-                              Test Webhook Message
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Option B: OAuth Spaces Connect */}
-                      <div className="p-4 rounded-xl bg-slate-950/40 border border-slate-800/60 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-200">Option B: Google Account OAuth</span>
-                          {googleChatToken && (
-                            <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/15">Connected</span>
-                          )}
-                        </div>
-
-                        {!googleChatToken ? (
-                          <div className="space-y-3">
-                            <p className="text-[10px] text-slate-400 leading-normal">
-                              Log in with your Google Workspace account to dynamically browse and select your active Chat spaces.
-                            </p>
-                            <button
-                              id="connect-gchat-settings-btn"
-                              type="button"
-                              onClick={handleConnectGoogleChat}
-                              className="w-full px-4 py-2 bg-slate-900 hover:bg-slate-850 text-slate-200 border border-slate-700 hover:border-slate-500 font-semibold text-xs rounded-xl transition duration-150 flex items-center justify-center gap-2 cursor-pointer"
-                            >
-                              <svg className="w-4 h-4 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
-                              </svg>
-                              Connect Google Account
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            <div>
-                              <label className="block text-[9px] text-slate-400 font-semibold mb-1">Target Space</label>
-                              {chatLoadingSpaces ? (
-                                <div className="text-xs text-slate-400 animate-pulse py-1">Loading spaces...</div>
-                              ) : chatSpaces.length === 0 ? (
-                                <div className="space-y-1.5">
-                                  <p className="text-[10px] text-amber-400 leading-normal">
-                                    No spaces found for this account. Make sure you belong to at least one active Google Chat space.
-                                  </p>
-                                  <button
-                                    type="button"
-                                    onClick={() => fetchGoogleChatSpaces(googleChatToken)}
-                                    className="text-[10px] text-emerald-400 hover:underline"
-                                  >
-                                    Retry Fetching Spaces
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col gap-2">
-                                  <select
-                                    id="gchat-space-select"
-                                    value={selectedSpace}
-                                    onChange={(e) => {
-                                      const sName = e.target.value;
-                                      setSelectedSpace(sName);
-                                      const found = chatSpaces.find(s => s.name === sName);
-                                      setSelectedSpaceDisplay(found ? (found.displayName || found.name) : sName);
-                                    }}
-                                    className="w-full bg-slate-900 border border-slate-800 rounded-lg py-1 px-2 text-xs text-white focus:outline-none focus:border-emerald-500"
-                                  >
-                                    {chatSpaces.map((space) => (
-                                      <option key={space.name} value={space.name}>
-                                        {space.displayName || space.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <button
-                                    type="button"
-                                    onClick={async () => {
-                                      const confirmed = window.confirm(`Send a test greeting to Google Chat space "${selectedSpaceDisplay}"?`);
-                                      if (confirmed) {
-                                        await sendGoogleChatMessage(`👋 *Hello from TMK Expense Tracker!* \nYour connected account space is working perfectly!`);
-                                      }
-                                    }}
-                                    className="w-full py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-lg text-xs font-semibold transition cursor-pointer"
-                                  >
-                                    Test OAuth Message
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Common Alert Configuration Controls */}
-                    {(chatWebhookUrl || (googleChatToken && selectedSpace)) && (
-                      <div className="p-4 rounded-xl bg-slate-950/20 border border-slate-800/40 space-y-4 mt-2">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                          <label className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-900/40 border border-slate-800/40 cursor-pointer hover:bg-slate-900 select-none">
-                            <input
-                              type="checkbox"
-                              checked={chatAutoPostWarnings}
-                              onChange={(e) => setChatAutoPostWarnings(e.target.checked)}
-                              className="rounded text-emerald-500 bg-slate-950 border-slate-800 focus:ring-emerald-500/20 w-4 h-4 cursor-pointer"
-                            />
-                            <div className="flex flex-col">
-                              <span className="text-slate-200 font-semibold">Post warnings automatically</span>
-                              <span className="text-[9px] text-slate-500">Post at 80% and 100% budget</span>
-                            </div>
-                          </label>
-
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const activeMonth = new Date().toISOString().substring(0, 7);
-                              const currentMonthSpent = expenses
-                                .filter(e => e.date.substring(0, 7) === activeMonth)
-                                .reduce((sum, e) => sum + e.amount, 0);
-                              const budget = profile?.monthlyBudget || 15000;
-                              const ratio = (currentMonthSpent / budget) * 100;
-                              const remaining = budget - currentMonthSpent;
-
-                              const confirmed = window.confirm(`Post your current monthly financial status report to Google Chat?`);
-                              if (!confirmed) return;
-
-                              const chatMsg = `📊 *TMK Expense Tracker: Monthly Spending Report* \n` +
-                                `Month: *${activeMonth}*\n` +
-                                `Total Spent: *${profileCurrency}${currentMonthSpent.toLocaleString()}*\n` +
-                                `Budget Limit: *${profileCurrency}${budget.toLocaleString()}*\n` +
-                                `Utilization: *${ratio.toFixed(1)}%*\n` +
-                                `Remaining Balance: *${profileCurrency}${remaining.toLocaleString()}*\n` +
-                                `_Report generated directly from the TMK Dashboard._`;
-                              
-                              await sendGoogleChatMessage(chatMsg);
-                            }}
-                            className="flex items-center justify-center gap-2 p-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 cursor-pointer transition select-none text-left"
-                          >
-                            <svg className="w-4 h-4 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/>
-                            </svg>
-                            <div className="flex flex-col">
-                              <span className="font-semibold">Publish Spending Digest</span>
-                              <span className="text-[9px] text-slate-500">Post current balance & status</span>
-                            </div>
-                          </button>
-                        </div>
-                      </div>
+                    {chatWebhookUrl && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await sendGoogleChatMessage(`👋 *Hello from TMK Ledger!* Webhook alerts are active.`);
+                        }}
+                        className="w-full py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-semibold cursor-pointer"
+                      >
+                        Send Test Ping
+                      </button>
                     )}
                   </div>
 
                 </div>
 
-                <div className="pt-4 mt-5 flex items-center justify-end gap-3 border-t border-slate-800/60">
+                <div className="pt-4 mt-4 flex items-center justify-end gap-2.5 border-t border-white/[0.08]">
                   <button
                     id="cancel-profile-settings-btn"
                     type="button"
                     onClick={() => setIsProfileOpen(false)}
-                    className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-slate-200 cursor-pointer"
+                    className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     id="save-profile-settings-btn"
                     type="submit"
-                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition duration-150 cursor-pointer"
+                    className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-bold text-xs rounded-xl transition cursor-pointer"
                   >
                     Save Preferences
                   </button>
@@ -3457,7 +2894,21 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* CHAT ASSISTANT PANEL */}
+      {/* Floating Gemini AI Launcher Button */}
+      <motion.button
+        id="floating-gemini-chat-btn"
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={() => setIsAiOpen(true)}
+        className="fixed bottom-6 right-6 z-40 bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 text-slate-950 p-3.5 sm:px-4 sm:py-3 rounded-full shadow-2xl shadow-emerald-500/30 flex items-center gap-2 font-bold text-xs cursor-pointer border border-emerald-300/40 select-none group"
+        title="Open Gemini AI Financial Advisor"
+      >
+        <Bot className="w-5 h-5 text-slate-950 shrink-0" />
+        <span className="hidden sm:inline font-bold">Ask Gemini AI</span>
+        <span className="w-2 h-2 rounded-full bg-slate-950 animate-ping" />
+      </motion.button>
+
+      {/* Gemini AI Multi-Turn Drawer */}
       <AIChatAssistant
         expenses={expenses}
         budget={activeBudget}
@@ -3469,6 +2920,7 @@ export default function App() {
         selectedSpaceDisplay={selectedSpaceDisplay}
         webhookUrl={chatWebhookUrl}
         onSendGoogleChatMessage={sendGoogleChatMessage}
+        profileName={profile?.name}
       />
 
     </div>
